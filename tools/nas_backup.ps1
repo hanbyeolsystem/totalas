@@ -1,18 +1,11 @@
-# ===========================================================
-# totalas — NAS 자동 백업
-# 실행:  매일 새벽 (Windows 작업스케줄러 등록 권장)
-# 출력:  \\192.168.0.249\data\rental-backup-YYYYMMDD-vN\
-#   ├─ README.md            (백업 메타)
-#   ├─ rental_customers.json
-#   ├─ rental_contracts.json
-#   ├─ rental_printers.json
-#   ├─ rental_counters.json
-#   ├─ rental_meetings.json
-#   ├─ rental_archive.json
-#   ├─ rental_prices.json
-#   ├─ rental_customer_attachments.json
-#   └─ files/               (Storage rental-files 전체 미러)
-# ===========================================================
+# ==========================================================
+# totalas - NAS auto backup
+# Run: daily via Windows Task Scheduler
+# Output: \\192.168.0.249\data\rental-backup-YYYYMMDD-vN\
+#   - README.md
+#   - rental_*.json (Supabase tables dump)
+#   - files/  (Supabase Storage rental-files mirror)
+# ==========================================================
 
 param(
   [string]$EnvFile = "$PSScriptRoot\..\.env",
@@ -21,8 +14,9 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# .env 로드
+# Load .env
 if (Test-Path $EnvFile) {
   Get-Content $EnvFile | ForEach-Object {
     if ($_ -match '^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.+?)\s*$') {
@@ -32,28 +26,30 @@ if (Test-Path $EnvFile) {
 }
 
 $SUPA_URL = $env:SUPABASE_URL
-$SERVICE  = $env:SUPABASE_SERVICE_ROLE
-if (-not $SUPA_URL -or -not $SERVICE) {
-  Write-Error "환경변수 SUPABASE_URL / SUPABASE_SERVICE_ROLE 가 설정되지 않았습니다.  .env 파일 또는 시스템 환경변수에 추가하세요."
+# Support both old (SUPABASE_SERVICE_ROLE) and new (SUPABASE_SECRET_KEY) names
+$SECRET   = if ($env:SUPABASE_SECRET_KEY) { $env:SUPABASE_SECRET_KEY } else { $env:SUPABASE_SERVICE_ROLE }
+if (-not $SUPA_URL -or -not $SECRET) {
+  Write-Error "SUPABASE_URL / SUPABASE_SECRET_KEY not set. Add them to .env or system environment."
   exit 1
 }
 
-# 백업 폴더 결정 (rental-backup-YYYYMMDD-vN)
+# Determine backup folder name (rental-backup-YYYYMMDD-vN)
 $today = Get-Date -Format 'yyyyMMdd'
 $existing = @(Get-ChildItem -Path $NasRoot -Directory -Filter "rental-backup-$today-v*" -ErrorAction SilentlyContinue)
-$nextV = if ($existing.Count) { ($existing | ForEach-Object { [int]($_.Name -replace '.*-v','') } | Measure-Object -Maximum).Maximum + 1 } else { 1 }
+$nextV = if ($existing.Count) {
+  ($existing | ForEach-Object { [int]($_.Name -replace '.*-v','') } | Measure-Object -Maximum).Maximum + 1
+} else { 1 }
 $backupDir = Join-Path $NasRoot "rental-backup-$today-v$nextV"
 
-Write-Host "[+] 백업 대상: $backupDir"
-if ($DryRun) { Write-Host '[!] DRY RUN — 실제 쓰기 없음'; exit 0 }
+Write-Host "[+] Backup target: $backupDir"
+if ($DryRun) { Write-Host '[!] DRY RUN - no writes'; exit 0 }
 New-Item -ItemType Directory -Path $backupDir | Out-Null
 New-Item -ItemType Directory -Path "$backupDir\files" | Out-Null
 
-# REST 호출 helper
 $headers = @{
-  apikey          = $SERVICE
-  Authorization   = "Bearer $SERVICE"
-  Accept          = 'application/json'
+  apikey        = $SECRET
+  Authorization = "Bearer $SECRET"
+  Accept        = 'application/json'
 }
 
 $tables = @(
@@ -67,24 +63,25 @@ $tables = @(
   'rental_customer_attachments'
 )
 
-$summary = @{}
+$summary = [ordered]@{}
 foreach ($t in $tables) {
   Write-Host "  - $t ..." -NoNewline
-  $url = "$SUPA_URL/rest/v1/$t`?select=*"
+  $url = "$SUPA_URL/rest/v1/$t" + "?select=*"
   try {
     $rows = Invoke-RestMethod -Uri $url -Headers $headers -Method GET
     $rowCount = if ($rows) { @($rows).Count } else { 0 }
     $rows | ConvertTo-Json -Depth 8 | Out-File -FilePath "$backupDir\$t.json" -Encoding utf8
     $summary[$t] = $rowCount
-    Write-Host " $rowCount건"
+    Write-Host " $rowCount rows"
   } catch {
-    Write-Warning "  실패: $($_.Exception.Message)"
-    $summary[$t] = "ERROR: $($_.Exception.Message)"
+    $errMsg = $_.Exception.Message
+    Write-Warning "  fail: $errMsg"
+    $summary[$t] = "ERROR: $errMsg"
   }
 }
 
-# Storage 미러 — rental-files
-Write-Host "[+] Storage rental-files 다운로드..."
+# Storage mirror
+Write-Host "[+] Storage rental-files download..."
 $storageBase = "$SUPA_URL/storage/v1"
 function Download-Folder([string]$prefix, [string]$destLocal) {
   $listUrl = "$storageBase/object/list/rental-files"
@@ -92,13 +89,12 @@ function Download-Folder([string]$prefix, [string]$destLocal) {
   try {
     $items = Invoke-RestMethod -Uri $listUrl -Headers $headers -Method POST -Body $body -ContentType 'application/json'
   } catch {
-    Write-Warning "list 실패 ($prefix): $($_.Exception.Message)"
+    Write-Warning "list fail ($prefix): $($_.Exception.Message)"
     return
   }
   if (-not (Test-Path $destLocal)) { New-Item -ItemType Directory -Path $destLocal | Out-Null }
   foreach ($obj in $items) {
-    if ($obj.id -eq $null -and $obj.name) {
-      # 폴더인 경우 (id null), 재귀
+    if ($null -eq $obj.id -and $obj.name) {
       Download-Folder "$prefix$($obj.name)/" (Join-Path $destLocal $obj.name)
     } else {
       $remotePath = "$prefix$($obj.name)"
@@ -107,30 +103,33 @@ function Download-Folder([string]$prefix, [string]$destLocal) {
       try {
         Invoke-WebRequest -Uri $dlUrl -Headers $headers -OutFile $dst | Out-Null
       } catch {
-        Write-Warning "  다운로드 실패: $remotePath — $($_.Exception.Message)"
+        Write-Warning "  download fail: $remotePath"
       }
     }
   }
 }
 Download-Folder '' "$backupDir\files"
 
-# README 작성
-$readme = @"
-# rental-backup-$today-v$nextV
-
-생성: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-출처: $SUPA_URL  (Supabase REST API service_role 인증)
-
-## 테이블 행 수
-$(foreach ($k in $summary.Keys) { "- ``$k`` : $($summary[$k])" } | Out-String)
-
-## 복원
-1. ``*.json`` 을 새 Supabase 프로젝트에 INSERT (psql \copy 또는 supabase CLI 사용)
-2. ``files/`` 를 새 bucket ``rental-files`` 에 업로드 (supabase storage cp 또는 대시보드)
-3. 동일 RLS 정책 적용 (``supabase/migrations/20260511_init_rental.sql`` 참고)
-"@
-$readme | Out-File -FilePath "$backupDir\README.md" -Encoding utf8
+# README
+$readmeLines = @()
+$readmeLines += "# rental-backup-$today-v$nextV"
+$readmeLines += ""
+$readmeLines += "Created: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+$readmeLines += "Source:  $SUPA_URL  (Supabase REST API, secret key auth)"
+$readmeLines += ""
+$readmeLines += "## Table row counts"
+foreach ($k in $summary.Keys) {
+  $readmeLines += ('- ' + $k + ': ' + $summary[$k])
+}
+$readmeLines += ""
+$readmeLines += "## Restore"
+$readmeLines += "1. Apply schema: supabase/migrations/20260511_init_rental.sql"
+$readmeLines += "2. INSERT json files via psql or supabase CLI"
+$readmeLines += "3. Upload files/ to bucket rental-files"
+$readmeLines -join "`r`n" | Out-File -FilePath "$backupDir\README.md" -Encoding utf8
 
 Write-Host ""
-Write-Host "[OK] 백업 완료: $backupDir"
-foreach ($k in $summary.Keys) { Write-Host "  $k : $($summary[$k])" }
+Write-Host "[OK] Backup complete: $backupDir"
+foreach ($k in $summary.Keys) {
+  Write-Host ("  " + $k + " : " + $summary[$k])
+}
