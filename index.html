@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>임대홈 — 한별시스템 임대관리</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="메뉴">☰</button>
+
+<div class="app-layout">
+
+  <!-- ===== 사이드바 ===== -->
+  <aside class="sidebar" id="sidebar">
+    <a href="index.html" class="sidebar-brand">
+      <span class="brand-mark">🖨</span>
+      <span class="brand-text">한별시스템</span>
+    </a>
+    <a href="asms.html" class="sidebar-tool">
+      <span class="nav-icon">🛠</span>
+      <span>접수관리툴</span>
+    </a>
+    <a href="errorcode.html" class="sidebar-tool">
+      <span class="nav-icon">🔧</span>
+      <span>에러코드</span>
+    </a>
+    <div class="sidebar-section-label">임대 관리</div>
+    <nav class="sidebar-nav">
+      <a href="index.html" class="active">
+        <span class="nav-icon">🏠</span>
+        <span>임대홈</span>
+      </a>
+      <a href="customers.html">
+        <span class="nav-icon">👥</span>
+        <span>임대거래처</span>
+      </a>
+      <a href="contracts.html">
+        <span class="nav-icon">📋</span>
+        <span>임대계약서</span>
+      </a>
+      <a href="counters.html">
+        <span class="nav-icon">🖨</span>
+        <span>임대카운터</span>
+      </a>
+      <a href="#">
+        <span class="nav-icon">💰</span>
+        <span>임대추가요금청구</span>
+      </a>
+      <a href="prices.html">
+        <span class="nav-icon">💵</span>
+        <span>가격표</span>
+      </a>
+      <a href="meetings.html">
+        <span class="nav-icon">🎙</span>
+        <span>음성미팅관리</span>
+      </a>
+      <a href="archive.html">
+        <span class="nav-icon">📁</span>
+        <span>고객자료실</span>
+      </a>
+    </nav>
+    <div class="sidebar-foot">
+      한별시스템<br>
+      053-588-7119
+    </div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <!-- ===== 메인 ===== -->
+  <div class="main-area">
+    <main class="container">
+
+      <!-- 빠른 등록 -->
+      <section class="quick-register card">
+        <div class="qr-text">
+          <h2>📇 명함 / 사업자등록증으로 빠른 등록</h2>
+          <p>이미지를 끌어다 놓으면 거래처 정보가 자동으로 채워집니다.<br>
+             <span class="muted">상호 · 대표자 · 사업자등록번호 · 주소 · 연락처 추출</span></p>
+        </div>
+        <div class="qr-drop" id="drop-zone">
+          <div class="qr-drop-inner">
+            <div class="qr-drop-icon">📥</div>
+            <div class="qr-drop-title">여기에 이미지 끌어다 놓기</div>
+            <div class="qr-drop-hint">또는 <label class="link" for="qr-file">파일 선택</label></div>
+            <input type="file" id="qr-file" accept="image/*" hidden>
+          </div>
+        </div>
+      </section>
+
+      <!-- 현황 요약 -->
+      <section class="stats">
+        <div class="stat-card">
+          <div class="stat-label">임대 거래처</div>
+          <div class="stat-value">0<span class="unit">곳</span></div>
+          <div class="stat-sub muted">이번 달 신규 +0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">임대 프린터</div>
+          <div class="stat-value">0<span class="unit">대</span></div>
+          <div class="stat-sub muted">활성 0 / 회수 0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">이번 달 청구 예정</div>
+          <div class="stat-value primary">₩0</div>
+          <div class="stat-sub muted">대상 0곳</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">계약 만료 예정</div>
+          <div class="stat-value warn">0<span class="unit">건</span></div>
+          <div class="stat-sub muted">90일 이내</div>
+        </div>
+      </section>
+
+      <!-- 핵심 메뉴 -->
+      <section class="menu-grid">
+        <a class="menu-card" href="customers.html">
+          <div class="menu-icon" style="background:#dbeafe; color:#1d4ed8;">👥</div>
+          <div class="menu-body">
+            <div class="menu-title">임대거래처</div>
+            <div class="menu-desc">임대 고객 등록·수정·삭제. 명함 OCR로 자동 입력. 신분증 / 사업자등록증 안전 보관.</div>
+          </div>
+          <div class="menu-arrow">→</div>
+        </a>
+
+        <a class="menu-card" href="contracts.html">
+          <div class="menu-icon" style="background:#fef3c7; color:#b45309;">📋</div>
+          <div class="menu-body">
+            <div class="menu-title">임대계약서</div>
+            <div class="menu-desc">3페이지 렌탈 계약서 자동 작성. 거래처 선택 시 자동 채움. PDF 출력.</div>
+          </div>
+          <div class="menu-arrow">→</div>
+        </a>
+
+        <a class="menu-card" href="#">
+          <div class="menu-icon" style="background:#dcfce7; color:#15803d;">🖨</div>
+          <div class="menu-body">
+            <div class="menu-title">임대카운터</div>
+            <div class="menu-desc">매월 자동 수집된 카운터 확인·보정. 시리얼별 누적 이력 관리.</div>
+          </div>
+          <div class="menu-arrow">→</div>
+        </a>
+
+        <a class="menu-card" href="#">
+          <div class="menu-icon" style="background:#fce7f3; color:#be185d;">💰</div>
+          <div class="menu-body">
+            <div class="menu-title">임대추가요금청구</div>
+            <div class="menu-desc">월별 추가 사용량 자동 계산. 청구서 발행·전송. 1년치 / 기간별 출력.</div>
+          </div>
+          <div class="menu-arrow">→</div>
+        </a>
+      </section>
+
+      <!-- 최근 활동 -->
+      <section class="recent card">
+        <div class="recent-head">
+          <h3>최근 활동</h3>
+          <a href="#" class="muted">전체 보기 →</a>
+        </div>
+        <ul class="activity">
+          <li class="empty muted">활동 내역이 표시됩니다 (거래처 등록, 카운터 수집, 청구서 발행 등)</li>
+        </ul>
+      </section>
+
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner muted">
+        한별시스템 · 대구광역시 달서구 문화회관11안길 22-7 1층 · 010-4585-6890
+      </div>
+    </footer>
+  </div>
+</div>
+
+<script>
+// 모바일 사이드바 토글
+document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('show');
+});
+document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
+});
+</script>
+</body>
+</html>
