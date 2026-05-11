@@ -25,13 +25,9 @@ document.addEventListener('totalas:ready', async () => {
   try {
     if (typeof showLoading === 'function') showLoading('계약서 로드 중…');
     await store.load();
-    // [DEBUG-TEMP] 진단용 — 확인 후 제거
-    const _dbg = `[진단] 계약서 ${Object.keys(store.data.contracts||{}).length}건 / 거래처 ${Object.keys(store.data.customers||{}).length}곳`;
-    console.log(_dbg);
-    alert(_dbg);
   } catch (err) {
     console.error('store.load() 실패:', err);
-    alert('데이터 로드 실패: ' + (err.message || err) + '\n\nstack: ' + String(err.stack || '').slice(0, 200));
+    alert('데이터 로드 실패: ' + (err.message || err));
     return;
   } finally {
     if (typeof hideLoading === 'function') hideLoading();
