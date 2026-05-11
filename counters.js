@@ -8,9 +8,18 @@ const counterState = {
   onlyBillable: false,
 };
 
-window.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('totalas:ready', async () => {
   if (!document.querySelector('.counters-page')) return;
-  store.load();
+  try {
+    if (typeof showLoading === 'function') showLoading('카운터 로드 중…');
+    await store.load();
+  } catch (err) {
+    console.error('store.load() 실패:', err);
+    alert('데이터 로드 실패: ' + (err.message || err));
+    return;
+  } finally {
+    if (typeof hideLoading === 'function') hideLoading();
+  }
   initCounterPage();
 });
 
@@ -124,11 +133,10 @@ async function handleCounterXlsx(file) {
       groupToSerials[group].push({ serial: sKey, model, asset });
     }
 
-    // 프린터 마스터 자동 추가
+    // 프린터 마스터 자동 추가 (Supabase 적용은 아래 일괄 처리)
     if (!store.data.printers[sKey]) {
       store.data.printers[sKey] = {
         serial: sKey, model, group, asset_name: asset,
-        ip: r[6] || '',
         matched_customer_id: null,
       };
     }
@@ -143,8 +151,24 @@ async function handleCounterXlsx(file) {
   }
 
   const wasOverwritten = !!store.data.counters[usagePeriod];
-  store.data.counters[usagePeriod] = counterMap;
-  store.save();
+
+  // Supabase에 저장: 새 프린터 → upsert, 카운터 → batch upsert
+  try {
+    if (typeof showLoading === 'function') showLoading('카운터 저장 중…');
+    for (const ns of newSerials) {
+      await store.upsertPrinter({
+        serial: ns.serial, model: ns.model, group: ns.group, asset_name: ns.asset_name,
+        matched_customer_id: null,
+      });
+    }
+    await store.upsertCounterBatch(usagePeriod, counterMap);
+  } catch (err) {
+    alert('저장 실패: ' + (err.message || err));
+    if (typeof hideLoading === 'function') hideLoading();
+    return;
+  } finally {
+    if (typeof hideLoading === 'function') hideLoading();
+  }
 
   renderStats();
   renderCounterTable();
@@ -208,27 +232,30 @@ function showImportReport(r) {
   showModal(html, { wide: true });
 
   document.querySelectorAll('button[data-add-grp]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const idx = parseInt(btn.dataset.addGrp);
       const grp = r.newGroups[idx];
       const newId = uid();
-      store.data.customers[newId] = {
-        id: newId,
-        company: grp.group,
-        ceo: '', biz_no: '', corp_no: '', biz_type: '', biz_item: '',
-        address: '', phone: '', fax: '', email: '', kakao: '', memo: '',
-        serials: grp.serials.map(s => s.serial),
-        base_fee: 0, bw_free: 0, bw_rate: 0, co_free: 0, co_rate: 0,
-        contract_start: '', contract_end: '', contract_file: '',
-        created_at: nowIso(), updated_at: nowIso(),
-      };
-      for (const s of grp.serials) {
-        if (store.data.printers[s.serial]) {
-          store.data.printers[s.serial].matched_customer_id = newId;
+      btn.disabled = true; btn.textContent = '등록 중…';
+      try {
+        await store.upsertCustomer({
+          id: newId,
+          company: grp.group,
+          serials: grp.serials.map(s => s.serial),
+        });
+        for (const s of grp.serials) {
+          if (store.data.printers[s.serial]) {
+            await store.upsertPrinter({
+              ...store.data.printers[s.serial],
+              matched_customer_id: newId,
+            });
+          }
         }
+      } catch (err) {
+        alert('등록 실패: ' + (err.message || err));
+        btn.disabled = false; btn.textContent = '+ 거래처 자동 등록';
+        return;
       }
-      store.save();
-      btn.disabled = true;
       btn.textContent = '✓ 등록됨';
       btn.style.opacity = '0.6';
       renderCounterTable();
@@ -288,8 +315,8 @@ function bindAddPeriod() {
     const p = prompt('새 월을 추가합니다 (YYYY-MM):', new Date().toISOString().slice(0, 7));
     if (!p || !/^\d{4}-\d{2}$/.test(p)) { alert('형식 오류 (예: 2026-05)'); return; }
     if (store.data.counters[p]) { alert('이미 존재하는 월입니다'); return; }
+    // DB row는 첫 카운터 입력 시 자동 생성 — 메모리에만 빈 컬럼 표시
     store.data.counters[p] = {};
-    store.save();
     renderStats();
     renderCounterTable();
   });
@@ -384,60 +411,92 @@ function renderCounterTable() {
 
   // 셀 변경 (자동 저장)
   table.querySelectorAll('input.counter-cell').forEach(inp => {
-    inp.addEventListener('change', () => {
+    inp.addEventListener('change', async () => {
       const period = inp.dataset.period;
       const serial = inp.dataset.serial;
       const raw = inp.value.trim().replace(/,/g, '');
       const v = raw === '' ? null : (parseInt(raw) || 0);
-      if (!store.data.counters[period]) store.data.counters[period] = {};
-      if (!store.data.counters[period][serial]) store.data.counters[period][serial] = {};
-      store.data.counters[period][serial][counterState.mode] = v;
-      store.save();
-      inp.classList.add('saved');
-      setTimeout(() => inp.classList.remove('saved'), 800);
+      const prev = (store.data.counters[period] || {})[serial] || {};
+      const merged = {
+        bw: prev.bw ?? null,
+        co: prev.co ?? null,
+        last_update: prev.last_update || '',
+        source: prev.source || 'manual',
+        source_file: prev.source_file || '',
+      };
+      merged[counterState.mode] = v;
+      try {
+        await store.upsertCounter(period, serial, merged);
+        inp.classList.add('saved');
+        setTimeout(() => inp.classList.remove('saved'), 800);
+      } catch (err) {
+        alert('저장 실패: ' + (err.message || err));
+        inp.value = prev[counterState.mode] == null ? '' : prev[counterState.mode];
+      }
     });
   });
 
   // 거래처 매칭 변경
   table.querySelectorAll('select.cust-select').forEach(sel => {
-    sel.addEventListener('change', () => {
+    sel.addEventListener('change', async () => {
       const serial = sel.dataset.serial;
       const newCustId = sel.value || null;
       if (!store.data.printers[serial]) return;
       const oldCustId = store.data.printers[serial].matched_customer_id;
+      if (oldCustId === newCustId) return;
 
-      // 기존 거래처에서 시리얼 제거
-      if (oldCustId && store.data.customers[oldCustId]) {
-        const arr = store.data.customers[oldCustId].serials || [];
-        store.data.customers[oldCustId].serials = arr.filter(s => s !== serial);
-      }
-      // 새 거래처에 시리얼 추가
-      if (newCustId && store.data.customers[newCustId]) {
-        store.data.customers[newCustId].serials = store.data.customers[newCustId].serials || [];
-        if (!store.data.customers[newCustId].serials.includes(serial)) {
-          store.data.customers[newCustId].serials.push(serial);
+      sel.disabled = true;
+      try {
+        // 기존 거래처에서 시리얼 제거
+        if (oldCustId && store.data.customers[oldCustId]) {
+          const oldCust = store.data.customers[oldCustId];
+          const next = (oldCust.serials || []).filter(s => s !== serial);
+          await store.upsertCustomer({ ...oldCust, serials: next });
         }
+        // 새 거래처에 시리얼 추가
+        if (newCustId && store.data.customers[newCustId]) {
+          const newCust = store.data.customers[newCustId];
+          const arr = newCust.serials || [];
+          if (!arr.includes(serial)) {
+            await store.upsertCustomer({ ...newCust, serials: [...arr, serial] });
+          }
+        }
+        // 프린터 매칭 변경
+        await store.upsertPrinter({
+          ...store.data.printers[serial],
+          matched_customer_id: newCustId,
+        });
+      } catch (err) {
+        alert('매칭 변경 실패: ' + (err.message || err));
+        sel.value = oldCustId || '';
+        sel.disabled = false;
+        return;
       }
-      store.data.printers[serial].matched_customer_id = newCustId;
-      store.save();
+      sel.disabled = false;
       renderStats();
     });
   });
 
   // 시리얼 행 삭제
   table.querySelectorAll('button[data-serial-del]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const s = btn.dataset.serialDel;
       if (!confirm(`시리얼 ${s} 의 모든 월별 카운터 데이터를 삭제합니다. 시리얼 마스터도 제거됩니다.`)) return;
-      for (const p of Object.keys(store.data.counters)) {
-        delete store.data.counters[p][s];
+      btn.disabled = true;
+      try {
+        await store.deleteCounterSerial(s);
+        const cust = store.data.printers[s]?.matched_customer_id;
+        if (cust && store.data.customers[cust]) {
+          const c = store.data.customers[cust];
+          const next = (c.serials || []).filter(x => x !== s);
+          await store.upsertCustomer({ ...c, serials: next });
+        }
+        await store.deletePrinter(s);
+      } catch (err) {
+        alert('삭제 실패: ' + (err.message || err));
+        btn.disabled = false;
+        return;
       }
-      const cust = store.data.printers[s]?.matched_customer_id;
-      if (cust && store.data.customers[cust]) {
-        store.data.customers[cust].serials = (store.data.customers[cust].serials || []).filter(x => x !== s);
-      }
-      delete store.data.printers[s];
-      store.save();
       renderStats();
       renderCounterTable();
     });
@@ -445,12 +504,18 @@ function renderCounterTable() {
 
   // 월 전체 삭제
   table.querySelectorAll('button[data-period-del]').forEach(btn => {
-    btn.addEventListener('click', e => {
+    btn.addEventListener('click', async e => {
       e.stopPropagation();
       const p = btn.dataset.periodDel;
       if (!confirm(`${p} 카운터 데이터를 모두 삭제할까요?`)) return;
-      delete store.data.counters[p];
-      store.save();
+      btn.disabled = true;
+      try {
+        await store.deleteCounterPeriod(p);
+      } catch (err) {
+        alert('삭제 실패: ' + (err.message || err));
+        btn.disabled = false;
+        return;
+      }
       renderStats();
       renderCounterTable();
     });

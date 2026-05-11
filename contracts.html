@@ -56,7 +56,7 @@
     <div class="page-head-actions">
       <button class="btn ghost" id="btn-new">+ 새 계약서</button>
       <button class="btn ghost" id="btn-fill-from-customer">👥 거래처에서 채우기</button>
-      <button class="btn ghost" id="btn-import-seed" title="NAS 세부현황 242건 일괄 가져오기">🌱 시드 가져오기</button>
+      <button class="btn ghost" id="btn-import-seed" title="Supabase에서 최신 계약서 다시 불러오기">🔄 새로고침</button>
       <button class="btn ghost" id="btn-delete" title="현재 계약서 삭제">🗑 삭제</button>
       <button class="btn ghost" id="btn-print">🖨 인쇄 / PDF</button>
       <button class="btn primary" id="btn-save">💾 저장</button>
@@ -123,7 +123,7 @@ document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
 });
 </script>
 <script src="db.js"></script>
-<script src="seed-data.js"></script>
+<script src="db-supa.js"></script>
 <script src="app.js"></script>
 <script src="contracts.js"></script>
 </body>

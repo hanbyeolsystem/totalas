@@ -7,10 +7,18 @@ const meetingState = {
   filterCust: '',
 };
 
-window.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('totalas:ready', async () => {
   if (!document.querySelector('.meetings-page')) return;
-  store.load();
-  if (!store.data.meetings) { store.data.meetings = {}; store.save(); }
+  try {
+    if (typeof showLoading === 'function') showLoading('미팅 로드 중…');
+    await store.load();
+  } catch (err) {
+    console.error('store.load() 실패:', err);
+    alert('데이터 로드 실패: ' + (err.message || err));
+    return;
+  } finally {
+    if (typeof hideLoading === 'function') hideLoading();
+  }
   initMeetingPage();
 });
 
@@ -82,7 +90,7 @@ function renderMeetingList() {
   ul.innerHTML = meetings.map(m => {
     const cust = store.data.customers[m.customer_id];
     const dt = m.datetime ? formatKoDateTime(m.datetime) : '';
-    const hasAudio = !!m.audio_blob_id;
+    const hasAudio = !!m.audio_path;
     const hasMemo  = !!(m.memo && m.memo.trim());
     return `
       <li class="meeting-item ${meetingState.selectedId === m.id ? 'selected' : ''}" data-id="${m.id}">
@@ -120,23 +128,22 @@ async function renderMeetingDetail(id) {
   }
   const cust = store.data.customers[m.customer_id];
   let audioHtml = '';
-  if (m.audio_blob_id) {
+  if (m.audio_path) {
     try {
-      const rec = await blobDB.get(m.audio_blob_id);
-      if (rec?.blob) {
-        const url = URL.createObjectURL(rec.blob);
-        audioHtml = `
-          <section class="info-card">
-            <h4>🎙 음성</h4>
-            <audio controls src="${url}" style="width:100%;"></audio>
-            <div class="muted-small" style="margin-top:6px;">
-              ${escapeHtml(rec.name || '')} · ${formatBytes(rec.size || 0)}
-              <a href="${url}" download="${escapeHtml(rec.name || 'meeting.mp3')}" class="link" style="margin-left:8px;">📥 다운로드</a>
-            </div>
-          </section>
-        `;
-      }
-    } catch (e) { console.error(e); }
+      const blob = await store.downloadFile(m.audio_path);
+      const url = URL.createObjectURL(blob);
+      const fname = m.audio_path.split('/').pop();
+      audioHtml = `
+        <section class="info-card">
+          <h4>🎙 음성</h4>
+          <audio controls src="${url}" style="width:100%;"></audio>
+          <div class="muted-small" style="margin-top:6px;">
+            ${escapeHtml(fname)} · ${formatBytes(blob.size)}
+            <a href="${url}" download="${escapeHtml(fname)}" class="link" style="margin-left:8px;">📥 다운로드</a>
+          </div>
+        </section>
+      `;
+    } catch (e) { console.error('audio load:', e); }
   }
 
   wrap.innerHTML = `
@@ -170,11 +177,12 @@ async function deleteMeeting(id) {
   const m = store.data.meetings[id];
   if (!m) return;
   if (!confirm(`'${m.title}' 미팅 기록을 삭제할까요? (음성 파일도 함께 삭제됨)`)) return;
-  if (m.audio_blob_id) {
-    try { await blobDB.del(m.audio_blob_id); } catch (e) {}
+  try {
+    await store.deleteMeeting(id);
+  } catch (err) {
+    alert('삭제 실패: ' + (err.message || err));
+    return;
   }
-  delete store.data.meetings[id];
-  store.save();
   if (meetingState.selectedId === id) meetingState.selectedId = null;
   renderMeetingList();
   renderMeetingDetail(null);
@@ -206,25 +214,24 @@ async function openMeetingModal(id) {
   let pendingDelete = false;
 
   // 기존 음성 표시
-  if (meeting?.audio_blob_id) {
+  if (meeting?.audio_path) {
     try {
-      const rec = await blobDB.get(meeting.audio_blob_id);
-      if (rec?.blob) {
-        const url = URL.createObjectURL(rec.blob);
-        preview.classList.remove('hidden');
-        preview.innerHTML = `
-          <audio controls src="${url}" style="width:100%;margin-top:6px;"></audio>
-          <div class="muted-small" style="margin-top:4px;">${escapeHtml(rec.name)} · ${formatBytes(rec.size)}
-            <button class="btn ghost small danger" id="audio-remove" style="margin-left:8px;">제거</button>
-          </div>
-        `;
-        document.getElementById('audio-remove').addEventListener('click', () => {
-          pendingDelete = true;
-          preview.classList.add('hidden');
-          preview.innerHTML = '';
-        });
-      }
-    } catch (e) {}
+      const blob = await store.downloadFile(meeting.audio_path);
+      const url = URL.createObjectURL(blob);
+      const fname = meeting.audio_path.split('/').pop();
+      preview.classList.remove('hidden');
+      preview.innerHTML = `
+        <audio controls src="${url}" style="width:100%;margin-top:6px;"></audio>
+        <div class="muted-small" style="margin-top:4px;">${escapeHtml(fname)} · ${formatBytes(blob.size)}
+          <button class="btn ghost small danger" id="audio-remove" style="margin-left:8px;">제거</button>
+        </div>
+      `;
+      document.getElementById('audio-remove').addEventListener('click', () => {
+        pendingDelete = true;
+        preview.classList.add('hidden');
+        preview.innerHTML = '';
+      });
+    } catch (e) { console.error('audio preview:', e); }
   }
 
   drop.addEventListener('click', () => fileInp.click());
@@ -267,36 +274,35 @@ async function openMeetingModal(id) {
       title,
       attendees: (fd.get('attendees') || '').toString().trim(),
       memo: (fd.get('memo') || '').toString(),
-      audio_blob_id: meeting?.audio_blob_id || null,
-      created_at: meeting?.created_at || nowIso(),
-      updated_at: nowIso(),
+      audio_path: meeting?.audio_path || '',
     };
 
-    // 음성 처리
-    if (pendingDelete && obj.audio_blob_id) {
-      try { await blobDB.del(obj.audio_blob_id); } catch (e) {}
-      obj.audio_blob_id = null;
+    const saveBtnEl = document.getElementById('meeting-save');
+    saveBtnEl.disabled = true;
+    saveBtnEl.textContent = '저장 중…';
+    try {
+      // 음성 제거
+      if (pendingDelete && obj.audio_path) {
+        try { await store.deleteFile(obj.audio_path); } catch (e) { console.warn(e); }
+        obj.audio_path = '';
+      }
+      // 새 음성 업로드
+      if (pendingAudio) {
+        if (obj.audio_path) {
+          try { await store.deleteFile(obj.audio_path); } catch (e) { console.warn(e); }
+        }
+        const safe = pendingAudio.name.replace(/[^\w\.\-가-힣]+/g, '_');
+        const newPath = `meetings/${targetId}/${Date.now()}_${safe}`;
+        await store.uploadFile(newPath, pendingAudio.blob, { contentType: pendingAudio.type });
+        obj.audio_path = newPath;
+      }
+      await store.upsertMeeting(obj);
+    } catch (err) {
+      alert('저장 실패: ' + (err.message || err));
+      saveBtnEl.disabled = false;
+      saveBtnEl.textContent = '저장';
+      return;
     }
-    if (pendingAudio) {
-      // 기존 것 제거
-      if (obj.audio_blob_id) { try { await blobDB.del(obj.audio_blob_id); } catch (e) {} }
-      const blobId = 'audio_' + uid();
-      await blobDB.put({
-        id: blobId,
-        kind: 'meeting_audio',
-        customer_id,
-        meeting_id: targetId,
-        blob: pendingAudio.blob,
-        name: pendingAudio.name,
-        size: pendingAudio.size,
-        mime: pendingAudio.type,
-        uploaded_at: nowIso(),
-      });
-      obj.audio_blob_id = blobId;
-    }
-
-    store.data.meetings[targetId] = obj;
-    store.save();
     meetingState.selectedId = targetId;
     closeModal();
     renderMeetingList();
@@ -374,31 +380,29 @@ function openRecordModal() {
     if (!recordedBlob) { alert('녹음된 파일이 없습니다'); return; }
 
     const meetingId = 'mt_' + uid();
-    const blobId = 'audio_' + uid();
     const ext = (recordedBlob.type.split('/')[1] || 'webm').split(';')[0];
-    await blobDB.put({
-      id: blobId,
-      kind: 'meeting_audio',
-      customer_id,
-      meeting_id: meetingId,
-      blob: recordedBlob,
-      name: `녹음_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.${ext}`,
-      size: recordedBlob.size,
-      mime: recordedBlob.type,
-      uploaded_at: nowIso(),
-    });
-    store.data.meetings[meetingId] = {
-      id: meetingId,
-      customer_id,
-      datetime: nowLocalDt(),
-      title,
-      attendees: '',
-      memo: '',
-      audio_blob_id: blobId,
-      created_at: nowIso(),
-      updated_at: nowIso(),
-    };
-    store.save();
+    const fname = `녹음_${new Date().toISOString().slice(0,16).replace(/[:T]/g,'-')}.${ext}`;
+    const audioPath = `meetings/${meetingId}/${fname}`;
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = '업로드 중…';
+    try {
+      await store.uploadFile(audioPath, recordedBlob, { contentType: recordedBlob.type });
+      await store.upsertMeeting({
+        id: meetingId,
+        customer_id,
+        datetime: nowLocalDt(),
+        title,
+        attendees: '',
+        memo: '',
+        audio_path: audioPath,
+      });
+    } catch (err) {
+      alert('저장 실패: ' + (err.message || err));
+      saveBtn.disabled = false;
+      saveBtn.textContent = '미팅 기록으로 저장';
+      return;
+    }
     meetingState.selectedId = meetingId;
     closeModal();
     renderMeetingList();

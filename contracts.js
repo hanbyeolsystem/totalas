@@ -20,9 +20,18 @@ const DEFAULT_EXTRAS = [
 
 let ctState = { selectedId: null, search: '', sort: 'name' };
 
-window.addEventListener('DOMContentLoaded', () => {
-  store.load();
+document.addEventListener('totalas:ready', async () => {
   if (!document.querySelector('.contracts-page')) return;
+  try {
+    if (typeof showLoading === 'function') showLoading('계약서 로드 중…');
+    await store.load();
+  } catch (err) {
+    console.error('store.load() 실패:', err);
+    alert('데이터 로드 실패: ' + (err.message || err));
+    return;
+  } finally {
+    if (typeof hideLoading === 'function') hideLoading();
+  }
   bindContractPage();
   renderContractList();
   renderEmptyDoc();
@@ -91,7 +100,7 @@ function renderContractList() {
         <div class="ct-item-sub muted-small">${fee}원 · ${escapeHtml(itemSummary || '품목 없음')}</div>
       </li>
     `;
-  }).join('') || '<li class="ct-item-empty muted-small">계약서가 없습니다. 우측 상단 "+ 새 계약서" 또는 "🌱 시드 가져오기"를 사용하세요.</li>';
+  }).join('') || '<li class="ct-item-empty muted-small">계약서가 없습니다. 우측 상단 "+ 새 계약서"를 사용하세요.</li>';
 
   ul.querySelectorAll('.ct-item').forEach(li => {
     li.addEventListener('click', () => loadContract(li.dataset.id));
@@ -535,15 +544,19 @@ function saveCurrentContract() {
     }
   }
 
-  store.data.contracts[c.id] = c;
-  store.save();
+  try {
+    await store.upsertContract(c);
+  } catch (err) {
+    alert('저장 실패: ' + (err.message || err));
+    return;
+  }
   ctState.selectedId = c.id;
 
   setStatus(`✅ 저장됨 — ${c.company} (${fmtDate(c.updated_at)})`);
   renderContractList();
 }
 
-function deleteCurrentContract() {
+async function deleteCurrentContract() {
   if (!ctState.selectedId) {
     alert('선택된 계약서가 없습니다.');
     return;
@@ -551,8 +564,12 @@ function deleteCurrentContract() {
   const c = store.data.contracts[ctState.selectedId];
   if (!c) return;
   if (!confirm(`"${c.company}" 계약서를 삭제하시겠습니까?\n\n이 작업은 되돌릴 수 없습니다.`)) return;
-  delete store.data.contracts[ctState.selectedId];
-  store.save();
+  try {
+    await store.deleteContract(ctState.selectedId);
+  } catch (err) {
+    alert('삭제 실패: ' + (err.message || err));
+    return;
+  }
   ctState.selectedId = null;
   renderContractList();
   renderEmptyDoc();
@@ -639,54 +656,19 @@ function fillFromCustomer(cust) {
 }
 
 // ============================================================
-// 시드 가져오기 (NAS 세부현황 242건)
+// 🔄 Supabase에서 새로고침 (시드 가져오기 자리에 — 데이터는 이미 Supabase에 적재됨)
 // ============================================================
-function importContractSeed() {
-  const seed = window.RENTAL_SEED;
-  if (!seed || !seed.contracts) {
-    alert('시드 데이터가 없습니다.\ntools/build_seed.py 실행 후 다시 시도하세요.');
-    return;
+async function importContractSeed() {
+  const btn = document.getElementById('btn-import-seed');
+  if (btn) { btn.disabled = true; btn.textContent = '🔄 새로고침 중…'; }
+  try {
+    await store.load();
+    renderContractList();
+    setStatus('✅ Supabase에서 최신 계약서를 다시 불러왔습니다');
+  } catch (e) {
+    alert('새로고침 실패: ' + (e.message || e));
   }
-  const seedContracts = Object.values(seed.contracts);
-  const existCount = Object.keys(store.data.contracts || {}).length;
-  if (!confirm(
-    `📋 NAS 세부현황 ${seedContracts.length}건의 계약서를 가져옵니다.\n\n` +
-    `현재 보관 ${existCount}건 (회사명 동일 시 갱신, 신규는 추가).\n\n` +
-    `계속하시겠습니까?`
-  )) return;
-
-  let added = 0, updated = 0;
-  for (const sc of seedContracts) {
-    const existId = Object.entries(store.data.contracts).find(
-      ([id, c]) => normalizeName(c.company) === normalizeName(sc.company)
-    )?.[0];
-
-    const now = nowIso();
-    const ct = {
-      ...sc,
-      contract_months: sc.contract_months || 36,
-      pay_day: sc.pay_day || 25,
-      terms_checked: sc.terms_checked || [true, true, true, true, true],
-      extras_checked: sc.extras_checked || [true, true, true, true],
-      special: sc.special && sc.special.length ? sc.special : ['', ''],
-      bank: sc.bank || { name: '농협', acct: '010-4585-6890-09', holder: '김상환(한별시스템)' },
-      updated_at: now,
-    };
-    if (existId) {
-      ct.id = existId;
-      ct.created_at = store.data.contracts[existId].created_at || now;
-      store.data.contracts[existId] = ct;
-      updated++;
-    } else {
-      ct.id = sc.id || ('ct_' + Date.now().toString(36) + Math.random().toString(36).slice(2,5));
-      ct.created_at = now;
-      store.data.contracts[ct.id] = ct;
-      added++;
-    }
-  }
-  store.save();
-  alert(`✅ 시드 가져오기 완료\n· 신규: ${added}건\n· 갱신: ${updated}건\n\n좌측 목록에서 확인하세요.`);
-  renderContractList();
+  if (btn) { btn.disabled = false; btn.textContent = '🔄 새로고침'; }
 }
 
 // ============================================================

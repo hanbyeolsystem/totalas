@@ -2,31 +2,8 @@
 'use strict';
 
 // ============================================================
-// STORAGE
+// STORAGE: db-supa.js 가 window.store 로 등록함 (Supabase 기반)
 // ============================================================
-const STORAGE_KEY = 'rental_mgmt_v1';
-
-const store = {
-  data: null,
-  load() {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try { this.data = JSON.parse(raw); }
-      catch (e) { this.data = null; }
-    }
-    if (!this.data) {
-      this.data = { customers: {}, printers: {}, contracts: {}, counters: {}, meta: {} };
-      this.save();
-    }
-    // 안전장치
-    this.data.customers = this.data.customers || {};
-    this.data.printers  = this.data.printers  || {};
-    this.data.contracts = this.data.contracts || {};
-    this.data.counters  = this.data.counters  || {};
-    return this.data;
-  },
-  save() { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.data)); },
-};
 
 // ============================================================
 // 유틸
@@ -68,19 +45,45 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 // ============================================================
-// 거래처 관리 페이지 부트
+// 거래처 관리 페이지 부트 (인증 + Supabase 데이터 로드 후 실행)
 // ============================================================
-window.addEventListener('DOMContentLoaded', () => {
-  store.load();
-  // 거래처 페이지 전용 바인딩
-  if (document.querySelector('.customers-page')) {
-    bindCustomerPage();
-    renderCustomerList();
-    // 첫 거래처 자동 선택
-    const first = Object.values(store.data.customers).sort((a,b) => a.company.localeCompare(b.company, 'ko'))[0];
-    if (first) selectCustomer(first.id);
+document.addEventListener('totalas:ready', async () => {
+  if (!document.querySelector('.customers-page')) return;
+
+  try {
+    showLoading('데이터 로드 중…');
+    await store.load();
+  } catch (err) {
+    console.error('store.load() 실패:', err);
+    alert('데이터 로드 실패: ' + (err.message || err));
+    return;
+  } finally {
+    hideLoading();
   }
+
+  bindCustomerPage();
+  renderCustomerList();
+  const first = Object.values(store.data.customers).sort((a, b) =>
+    (a.company || '').localeCompare(b.company || '', 'ko')
+  )[0];
+  if (first) selectCustomer(first.id);
 });
+
+function showLoading(text = '로딩 중…') {
+  let el = document.getElementById('global-loading');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'global-loading';
+    el.className = 'global-loading';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.display = 'flex';
+}
+function hideLoading() {
+  const el = document.getElementById('global-loading');
+  if (el) el.style.display = 'none';
+}
 
 let state = { selectedId: null, search: '', sort: 'name' };
 
@@ -89,7 +92,7 @@ function bindCustomerPage() {
   $('#btn-ocr').addEventListener('click', openOcrModal);
   $('#btn-export').addEventListener('click', exportCustomers);
   $('#btn-nas-backup')?.addEventListener('click', exportNasBackup);
-  $('#btn-seed')?.addEventListener('click', importSeedData);
+  $('#btn-seed')?.addEventListener('click', refreshFromSupabase);
   $('#btn-asms-link')?.addEventListener('click', () => openAsmsModal({ pickerMode: false }));
 
   $('#cust-search').addEventListener('input', e => {
@@ -451,22 +454,18 @@ async function openCustomerModal(id) {
     const newAsmsCu = form.dataset.asmsCuNumber || (isEdit ? store.data.customers[id]?.asms_cu_number : '');
     if (newAsmsCu) obj.asms_cu_number = newAsmsCu;
 
+    let saved;
     if (isEdit) {
-      Object.assign(store.data.customers[id], obj);
-      store.data.customers[id].updated_at = nowIso();
+      const merged = { ...store.data.customers[id], ...obj };
+      saved = await store.upsertCustomer(merged);
     } else {
       obj.serials = [];
       obj.base_fee = 0;
       obj.bw_free = 0; obj.bw_rate = 0;
       obj.co_free = 0; obj.co_rate = 0;
-      obj.contract_start = ''; obj.contract_end = '';
-      obj.contract_file = '';
-      obj.created_at = nowIso();
-      obj.updated_at = nowIso();
-      store.data.customers[obj.id] = obj;
-      state.selectedId = obj.id;
+      saved = await store.upsertCustomer(obj);
+      state.selectedId = saved.id;
     }
-    store.save();
 
     // 첨부 IndexedDB에 반영
     for (const [type, p] of Object.entries(pending)) {
@@ -498,9 +497,13 @@ async function deleteCustomer(id) {
   const c = store.data.customers[id];
   if (!c) return;
   if (!confirm(`'${c.company}' 거래처를 삭제할까요?\n첨부 이미지(사업자/명함/신분증/통장사본)도 함께 영구 삭제됩니다.`)) return;
-  delete store.data.customers[id];
-  store.save();
-  // IndexedDB의 첨부도 삭제
+  try {
+    await store.deleteCustomer(id);
+  } catch (err) {
+    alert('삭제 실패: ' + (err.message || err));
+    return;
+  }
+  // IndexedDB의 첨부도 삭제 (Phase 3에서 Supabase Storage로 이전 예정)
   if (window.attDB) {
     try { await attDB.delByCustomer(id); } catch (e) { console.error(e); }
   }
@@ -589,9 +592,8 @@ function openOcrModal() {
       created_at: nowIso(), updated_at: nowIso(),
     };
     delete obj.attachments;
-    store.data.customers[obj.id] = obj;
-    store.save();
-    state.selectedId = obj.id;
+    const savedC = await store.upsertCustomer(obj);
+    state.selectedId = savedC.id;
     // OCR로 올린 이미지를 명함 슬롯에 자동 저장
     if (attachedDataUrl) {
       const t = ATTACHMENT_TYPES.find(x => x.key === 'business_card');
@@ -739,20 +741,17 @@ async function importAsmsAsNewCustomer(rec) {
   if (dup) {
     if (!confirm(`이미 등록된 고객입니다 (${dup.company}). 그래도 추가로 가져올까요?`)) return;
   }
-  const id = uid();
-  store.data.customers[id] = {
-    id,
+  const newCust = {
+    id: uid(),
     ...data,
     serials: [],
     base_fee: 0, bw_free: 0, bw_rate: 0, co_free: 0, co_rate: 0,
-    contract_start: '', contract_end: '', contract_file: '',
-    created_at: nowIso(), updated_at: nowIso(),
   };
-  store.save();
-  state.selectedId = id;
+  const saved = await store.upsertCustomer(newCust);
+  state.selectedId = saved.id;
   closeModal();
   renderCustomerList();
-  renderCustomerDetail(id);
+  renderCustomerDetail(saved.id);
 }
 
 // NAS 백업: 거래처 메타 + 첨부 이미지를 거래처 폴더로 묶은 zip
@@ -848,162 +847,24 @@ function normalizeName(s) {
   return String(s).replace(/[\s()\-_/\.,\n]+/g, '').toLowerCase();
 }
 
-function importSeedData() {
-  const seed = window.RENTAL_SEED;
-  if (!seed) {
-    alert('seed-data.js가 로드되지 않았습니다.\ntools/build_seed.py 실행 후 다시 시도하세요.');
-    return;
-  }
-
-  const meta = seed.meta || {};
-  const counts = meta.counts || {};
-  const cur = store.data;
-  const curCustCount = Object.keys(cur.customers || {}).length;
-  const curPrintCount = Object.keys(cur.printers || {}).length;
-  const curCntCount = Object.keys(cur.counters || {}).length;
-
-  const html = `
-    <h3>🌱 시드 데이터 가져오기</h3>
-    <p class="muted" style="margin:0 0 14px 0; font-size:13px;">
-      한별시스템 임대현황 마스터 + NAS 월별카운터에서 추출한 데이터를 가져옵니다.
-    </p>
-    <div class="seed-summary">
-      <div class="seed-row"><span>📅 시드 빌드일</span><strong>${escapeHtml(meta.seed_built_at || '-')}</strong></div>
-      <div class="seed-row"><span>👥 거래처</span><strong>${counts.customers || 0}곳</strong></div>
-      <div class="seed-row"><span>🖨 시리얼</span><strong>${counts.printers || 0}대 <span class="muted-small">(매칭 ${counts.matched_serials || 0})</span></strong></div>
-      <div class="seed-row"><span>📊 카운터</span><strong>${counts.counters_periods || 0}개월</strong></div>
-    </div>
-    <div class="seed-current muted-small" style="margin:10px 0; padding:8px 10px; background:#f7f8fa; border-radius:6px;">
-      현재 보관 중: 거래처 ${curCustCount}곳 · 시리얼 ${curPrintCount}대 · 카운터 ${curCntCount}개월
-    </div>
-    <fieldset style="border:1px solid #e1e5ec; border-radius:6px; padding:10px 14px; margin:8px 0 14px;">
-      <legend style="padding:0 6px; font-weight:600; font-size:13px;">병합 모드</legend>
-      <label style="display:block; padding:4px 0;">
-        <input type="radio" name="seed-mode" value="merge" checked>
-        <strong>스마트 병합</strong> <span class="muted-small">(권장 / 회사명 동일 시 유지, 시리얼은 추가)</span>
-      </label>
-      <label style="display:block; padding:4px 0;">
-        <input type="radio" name="seed-mode" value="replace">
-        <strong>전체 교체</strong> <span class="muted-small" style="color:var(--danger);">(현재 거래처/카운터 모두 삭제 후 시드로 교체)</span>
-      </label>
-    </fieldset>
-    <div class="modal-actions">
-      <button class="btn ghost" data-close>취소</button>
-      <button class="btn primary" id="seed-go">가져오기</button>
-    </div>
-  `;
-  showModal(html);
-
-  $('#seed-go').addEventListener('click', () => {
-    const mode = document.querySelector('input[name="seed-mode"]:checked')?.value || 'merge';
-    const result = applySeed(seed, mode);
-    closeModal();
-    alert(
-      `✅ 시드 가져오기 완료 (${mode === 'replace' ? '전체 교체' : '스마트 병합'})\n` +
-      `· 거래처 추가: ${result.addedCust}곳 / 갱신: ${result.updatedCust}곳 / 스킵: ${result.skippedCust}곳\n` +
-      `· 시리얼 추가: ${result.addedPrint}대 / 갱신: ${result.updatedPrint}대\n` +
-      `· 카운터 월: ${result.addedCnt}개월\n\n` +
-      `📁 추출된 데이터에 OCR 첨부, 사업자번호, 대표자, 이메일은 빠져있습니다 — 거래처별로 보강해 주세요.`
-    );
+async function refreshFromSupabase() {
+  const btn = $('#btn-seed');
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '🔄 새로고침 중…';
+  try {
+    await store.load();
     renderCustomerList();
-  });
+    if (state.selectedId && store.data.customers[state.selectedId]) {
+      renderCustomerDetail(state.selectedId);
+    }
+    btn.textContent = '✅ 완료';
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1200);
+  } catch (e) {
+    alert('새로고침 실패: ' + (e.message || e));
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
 }
 
-function applySeed(seed, mode) {
-  const result = { addedCust: 0, updatedCust: 0, skippedCust: 0, addedPrint: 0, updatedPrint: 0, addedCnt: 0 };
-  const data = store.data;
-
-  if (mode === 'replace') {
-    data.customers = {};
-    data.printers = {};
-    data.counters = {};
-  }
-
-  // 회사명 인덱스
-  const idxByName = {};
-  for (const [id, c] of Object.entries(data.customers)) {
-    idxByName[normalizeName(c.company)] = id;
-  }
-
-  // 1) 거래처
-  for (const [seedId, sc] of Object.entries(seed.customers || {})) {
-    const norm = normalizeName(sc.company);
-    const existId = idxByName[norm];
-    if (existId && mode !== 'replace') {
-      // 갱신: 빈 필드 보강 + 시리얼 추가
-      const ex = data.customers[existId];
-      let touched = false;
-      const fillFields = ['address', 'phone', 'memo', 'base_fee', 'bw_free', 'bw_rate', 'co_free', 'co_rate'];
-      for (const k of fillFields) {
-        if ((!ex[k] || ex[k] === 0) && sc[k]) { ex[k] = sc[k]; touched = true; }
-      }
-      // 시리얼 머지
-      ex.serials = ex.serials || [];
-      for (const s of (sc.serials || [])) {
-        if (!ex.serials.includes(s)) { ex.serials.push(s); touched = true; }
-      }
-      if (touched) { ex.updated_at = nowIso(); result.updatedCust++; }
-      else result.skippedCust++;
-    } else {
-      // 새로 추가
-      const cleanCust = { ...sc };
-      delete cleanCust._extra_charge_raw;
-      data.customers[seedId] = cleanCust;
-      idxByName[norm] = seedId;
-      result.addedCust++;
-    }
-  }
-
-  // 2) 프린터 (시리얼 마스터)
-  for (const [serial, sp] of Object.entries(seed.printers || {})) {
-    const matchedCid = sp.matched_customer_id && data.customers[sp.matched_customer_id]
-      ? sp.matched_customer_id
-      : null;
-    if (data.printers[serial]) {
-      const ex = data.printers[serial];
-      if (!ex.model && sp.model) ex.model = sp.model;
-      if (!ex.group && sp.group) ex.group = sp.group;
-      if (!ex.asset_name && sp.asset_name) ex.asset_name = sp.asset_name;
-      if (!ex.matched_customer_id && matchedCid) ex.matched_customer_id = matchedCid;
-      result.updatedPrint++;
-    } else {
-      data.printers[serial] = {
-        serial,
-        model: sp.model || '',
-        group: sp.group || '',
-        asset_name: sp.asset_name || '',
-        matched_customer_id: matchedCid,
-      };
-      result.addedPrint++;
-    }
-    // 매칭된 거래처에 시리얼 자동 등록
-    if (matchedCid) {
-      const cust = data.customers[matchedCid];
-      cust.serials = cust.serials || [];
-      if (!cust.serials.includes(serial)) cust.serials.push(serial);
-    }
-  }
-
-  // 3) 카운터 (월별)
-  for (const [period, rows] of Object.entries(seed.counters || {})) {
-    if (!data.counters[period] || mode === 'replace') {
-      data.counters[period] = rows;
-      result.addedCnt++;
-    } else {
-      const cur = data.counters[period];
-      let added = false;
-      for (const [s, info] of Object.entries(rows)) {
-        if (!cur[s]) { cur[s] = info; added = true; }
-      }
-      if (added) result.addedCnt++;
-    }
-  }
-
-  // 메타 갱신
-  data.meta = data.meta || {};
-  data.meta.seed_imported_at = nowIso();
-  data.meta.seed_source = seed.meta || {};
-
-  store.save();
-  return result;
-}
