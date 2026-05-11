@@ -5,6 +5,10 @@ tools/seed_customers.json
 tools/seed_counters.json
 tools/seed_contracts.json
 
+# DB 백업 / 분석 중간 산출물 (운영 데이터 포함 — push 금지)
+tools/db_customers.json
+tools/_*.json
+
 # 원본 엑셀 / 임시 작업 폴더
 *.xlsx
 *.xls
