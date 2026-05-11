@@ -85,7 +85,7 @@ function hideLoading() {
   if (el) el.style.display = 'none';
 }
 
-let state = { selectedId: null, search: '', sort: 'name' };
+let state = { selectedId: null, search: '', sort: 'name', bulkSelected: new Set() };
 
 function bindCustomerPage() {
   $('#btn-add').addEventListener('click', () => openCustomerModal(null));
@@ -147,26 +147,113 @@ function renderCustomerList() {
     return a.company.localeCompare(b.company, 'ko');
   });
 
-  cnt.textContent = `${customers.length}곳`;
+  // 검색/정렬로 사라진 ID는 선택에서 제외 (혼란 방지)
+  const visibleIds = new Set(customers.map(c => c.id));
+  for (const id of Array.from(state.bulkSelected)) {
+    if (!visibleIds.has(id)) state.bulkSelected.delete(id);
+  }
+  const selCount = state.bulkSelected.size;
+  const allChecked = customers.length > 0 && customers.every(c => state.bulkSelected.has(c.id));
+
+  cnt.innerHTML = `${customers.length}곳${selCount > 0 ? ` <strong style="color:var(--danger); margin-left:6px;">· 선택 ${selCount}</strong>` : ''}`;
 
   if (customers.length === 0) {
     ul.innerHTML = `<li class="cust-list-empty muted">${state.search ? '검색 결과 없음' : '등록된 거래처 없음. 우측 상단에서 추가하세요.'}</li>`;
     return;
   }
 
-  ul.innerHTML = customers.map(c => `
-    <li class="cust-item ${state.selectedId === c.id ? 'selected' : ''}" data-id="${c.id}">
-      <div class="cust-item-name">${escapeHtml(c.company)}</div>
-      <div class="cust-item-meta">
-        ${c.ceo ? `<span>${escapeHtml(c.ceo)}</span>` : ''}
-        ${(c.serials?.length) ? `<span class="badge">🖨 ${c.serials.length}대</span>` : ''}
+  // 일괄 선택 바 (항상 표시 — 사용자가 즉시 모두 선택 가능)
+  const bulkBar = `
+    <li class="cust-bulk-bar" style="display:flex; align-items:center; gap:10px; padding:8px 12px; background:#f8fafc; border-bottom:1px solid var(--border); position:sticky; top:0; z-index:1;">
+      <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12.5px;">
+        <input type="checkbox" id="bulk-all" ${allChecked ? 'checked' : ''} style="width:16px; height:16px;">
+        <span class="muted-small">${allChecked ? '전체 해제' : '전체 선택'}</span>
+      </label>
+      ${selCount > 0 ? `
+        <button class="btn small ghost" id="bulk-clear" type="button">선택 해제</button>
+        <button class="btn small danger" id="bulk-del" type="button" style="margin-left:auto;">🗑 ${selCount}곳 삭제</button>
+      ` : ''}
+    </li>
+  `;
+
+  ul.innerHTML = bulkBar + customers.map(c => `
+    <li class="cust-item ${state.selectedId === c.id ? 'selected' : ''}" data-id="${c.id}" style="display:flex; align-items:center; gap:8px;">
+      <label class="cust-item-check" style="padding:4px 4px 4px 8px; cursor:pointer;">
+        <input type="checkbox" data-bulk="${c.id}" ${state.bulkSelected.has(c.id) ? 'checked' : ''} style="width:16px; height:16px;">
+      </label>
+      <div style="flex:1; min-width:0;">
+        <div class="cust-item-name">${escapeHtml(c.company)}</div>
+        <div class="cust-item-meta">
+          ${c.ceo ? `<span>${escapeHtml(c.ceo)}</span>` : ''}
+          ${(c.serials?.length) ? `<span class="badge">🖨 ${c.serials.length}대</span>` : ''}
+        </div>
       </div>
     </li>
   `).join('');
 
+  // 체크박스: li 클릭으로 전파되지 않게
+  ul.querySelectorAll('input[data-bulk]').forEach(cb => {
+    cb.addEventListener('click', e => e.stopPropagation());
+    cb.addEventListener('change', e => {
+      const id = e.target.dataset.bulk;
+      if (e.target.checked) state.bulkSelected.add(id);
+      else state.bulkSelected.delete(id);
+      renderCustomerList();
+    });
+  });
+  ul.querySelectorAll('.cust-item-check').forEach(lab => {
+    lab.addEventListener('click', e => e.stopPropagation());
+  });
+
+  // 전체 선택/해제
+  document.getElementById('bulk-all')?.addEventListener('change', e => {
+    if (e.target.checked) {
+      for (const c of customers) state.bulkSelected.add(c.id);
+    } else {
+      for (const c of customers) state.bulkSelected.delete(c.id);
+    }
+    renderCustomerList();
+  });
+
+  // 일괄 액션
+  document.getElementById('bulk-clear')?.addEventListener('click', () => {
+    state.bulkSelected.clear();
+    renderCustomerList();
+  });
+  document.getElementById('bulk-del')?.addEventListener('click', bulkDeleteCustomers);
+
   ul.querySelectorAll('.cust-item').forEach(li => {
     li.addEventListener('click', () => selectCustomer(li.dataset.id));
   });
+}
+
+async function bulkDeleteCustomers() {
+  const ids = Array.from(state.bulkSelected);
+  if (ids.length === 0) return;
+  const names = ids.slice(0, 5).map(id => store.data.customers[id]?.company || id);
+  const more = ids.length > 5 ? `\n· ... 외 ${ids.length - 5}곳` : '';
+  const msg = `다음 ${ids.length}곳을 삭제할까요?\n\n· ${names.join('\n· ')}${more}\n\n⚠ 되돌릴 수 없습니다.\n연결된 시리얼은 매칭만 풀리고, 카운터/계약서는 그대로 유지됩니다.`;
+  if (!confirm(msg)) return;
+
+  const btn = document.getElementById('bulk-del');
+  if (btn) { btn.disabled = true; btn.textContent = '삭제 중…'; }
+  let ok = 0, fail = 0;
+  for (const id of ids) {
+    try {
+      await store.deleteCustomer(id);
+      ok++;
+    } catch (e) {
+      console.error('deleteCustomer', id, e);
+      fail++;
+    }
+  }
+  state.bulkSelected.clear();
+  if (state.selectedId && !store.data.customers[state.selectedId]) {
+    state.selectedId = null;
+  }
+  renderCustomerList();
+  renderCustomerDetail(state.selectedId);
+  alert(`✅ 삭제 완료: ${ok}곳${fail ? ` / 실패 ${fail}곳 (콘솔 확인)` : ''}`);
 }
 
 function selectCustomer(id) {
