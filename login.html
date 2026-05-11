@@ -52,7 +52,7 @@
     const { data: { session } } = await supa.auth.getSession();
     if (session) {
       const params = new URLSearchParams(location.search);
-      location.replace(params.get('next') || 'index.html');
+      location.replace(params.get('next') || 'asms.html');
     }
   })();
 
@@ -75,7 +75,7 @@
       const { data, error } = await supa.auth.signInWithPassword({ email, password: pw });
       if (error) throw error;
       const params = new URLSearchParams(location.search);
-      location.replace(params.get('next') || 'index.html');
+      location.replace(params.get('next') || 'asms.html');
     } catch (err) {
       msg.textContent = '아이디 또는 비밀번호가 올바르지 않습니다.';
       msg.classList.add('error');
