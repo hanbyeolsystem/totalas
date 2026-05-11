@@ -28,14 +28,27 @@ document.addEventListener('totalas:ready', async () => {
   bindUI();
   refreshCustomerDatalist();
   renderBillingList();
-  // 기본값: 시작 = 지난달, 종료 = 지난달
-  const today = new Date();
-  const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const ym = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-  $('#period-start').value = ym(lastMonth);
-  $('#period-end').value   = ym(lastMonth);
-  $('#issued-at').value    = today.toISOString().slice(0, 10);
+  setDefaultPeriod();
 });
+
+/** 기본 기간 — DB의 최신 카운터 월 (없으면 지난달). 청구일자 = 오늘. */
+function setDefaultPeriod() {
+  const periods = Object.keys(store.data.counters || {})
+    .filter(p => /^\d{4}-\d{2}$/.test(p))
+    .sort();
+  const latest = periods[periods.length - 1];
+  const today = new Date();
+  const ym = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const fallback = ym(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+  const target = latest || fallback;
+  $('#period-start').value = target;
+  $('#period-end').value   = target;
+  $('#issued-at').value    = today.toISOString().slice(0, 10);
+  // 사이드 정보: 최신 카운터 월 안내
+  const info = `최신 카운터: ${latest || '(없음)'} · 전체 ${periods.length}개월`;
+  const hint = document.getElementById('period-hint');
+  if (hint) hint.textContent = info;
+}
 
 // ============================================================
 // 이벤트 바인딩
