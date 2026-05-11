@@ -14,7 +14,7 @@
   const STORE = {
     data: {
       customers: {}, printers: {}, counters: {}, contracts: {},
-      meetings: {}, archive: {}, prices: {}, meta: {},
+      meetings: {}, archive: {}, prices: {}, billings: {}, meta: {},
     },
     _loaded: false,
 
@@ -40,7 +40,7 @@
         return out;
       };
 
-      const [custs, prints, counters, contracts, meetings, prices, archive] = await Promise.all([
+      const [custs, prints, counters, contracts, meetings, prices, archive, billings] = await Promise.all([
         fetchAll('rental_customers', q => q.is('archived_at', null)),
         fetchAll('rental_printers'),
         fetchAll('rental_counters'),
@@ -48,6 +48,7 @@
         fetchAll('rental_meetings'),
         fetchAll('rental_prices'),
         fetchAll('rental_archive'),
+        fetchAll('rental_extra_billings').catch(() => []),
       ]);
 
       // customers: id 키
@@ -95,6 +96,10 @@
       // archive: id 키 (cust 내부에서도 customer_id로 필터)
       this.data.archive = {};
       for (const a of archive) this.data.archive[a.id] = a;
+
+      // billings: id 키
+      this.data.billings = {};
+      for (const b of (billings || [])) this.data.billings[b.id] = b;
 
       this._loaded = true;
       return this.data;
@@ -382,6 +387,78 @@
       const { error } = await supa.from('rental_prices').delete().eq('id', id);
       if (error) throw error;
       delete this.data.prices[id];
+    },
+
+    // ============================================================
+    // 추가요금 청구 (rental_extra_billings)
+    //   · details: { serials:[{ serial, model, rows:[{period,bw,co}] }] }
+    //   · 정책 snapshot (base_fee/bw_*/co_*) — 재계산해도 동일 결과
+    // ============================================================
+    async upsertBilling(b) {
+      const supa = window.totalasAuth;
+      if (!b.id) b.id = 'b_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const row = {
+        id: b.id,
+        customer_id: b.customer_id || null,
+        billing_no:  b.billing_no  || null,
+        period_start: b.period_start,
+        period_end:   b.period_end,
+        issued_at: b.issued_at || new Date().toISOString(),
+        base_fee: toInt(b.base_fee),
+        bw_free:  toInt(b.bw_free),
+        bw_rate:  toInt(b.bw_rate),
+        co_free:  toInt(b.co_free),
+        co_rate:  toInt(b.co_rate),
+        details:  b.details || {},
+        total_bw_fee: toInt(b.total_bw_fee),
+        total_co_fee: toInt(b.total_co_fee),
+        total_amount: toInt(b.total_amount),
+        paid_at:  b.paid_at || null,
+        memo:     b.memo || '',
+      };
+      const { error } = await supa.from('rental_extra_billings').upsert(row);
+      if (error) throw error;
+      this.data.billings[b.id] = { ...(this.data.billings[b.id] || {}), ...row };
+      return this.data.billings[b.id];
+    },
+
+    async deleteBilling(id) {
+      const supa = window.totalasAuth;
+      const { error } = await supa.from('rental_extra_billings').delete().eq('id', id);
+      if (error) throw error;
+      delete this.data.billings[id];
+    },
+
+    async markBillingPaid(id, paidAt) {
+      const supa = window.totalasAuth;
+      const iso = paidAt || new Date().toISOString();
+      const { error } = await supa.from('rental_extra_billings')
+        .update({ paid_at: iso }).eq('id', id);
+      if (error) throw error;
+      if (this.data.billings[id]) this.data.billings[id].paid_at = iso;
+    },
+
+    async markBillingUnpaid(id) {
+      const supa = window.totalasAuth;
+      const { error } = await supa.from('rental_extra_billings')
+        .update({ paid_at: null }).eq('id', id);
+      if (error) throw error;
+      if (this.data.billings[id]) this.data.billings[id].paid_at = null;
+    },
+
+    /** 'BL-2026-NNNN' 다음 번호 생성. */
+    nextBillingNo() {
+      const yyyy = String(new Date().getFullYear());
+      const prefix = `BL-${yyyy}-`;
+      let max = 0;
+      for (const b of Object.values(this.data.billings)) {
+        const no = b.billing_no || '';
+        if (no.startsWith(prefix)) {
+          const n = parseInt(no.slice(prefix.length), 10);
+          if (Number.isFinite(n) && n > max) max = n;
+        }
+      }
+      return prefix + String(max + 1).padStart(4, '0');
     },
 
     // ============================================================
