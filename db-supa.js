@@ -23,12 +23,15 @@
       if (!supa) throw new Error('인증 클라이언트가 준비되지 않았습니다');
 
       // 병렬 fetch (페이지네이션은 PostgREST 기본 1000 → range 활용)
-      const fetchAll = async (table) => {
+      // applyFilter: 호출자가 WHERE 절을 추가할 수 있도록 query 빌더 변환 함수
+      const fetchAll = async (table, applyFilter) => {
         const out = [];
         const page = 1000;
         let from = 0;
         while (true) {
-          const r = await supa.from(table).select('*').range(from, from + page - 1);
+          let q = supa.from(table).select('*').range(from, from + page - 1);
+          if (applyFilter) q = applyFilter(q);
+          const r = await q;
           if (r.error) throw r.error;
           out.push(...(r.data || []));
           if (!r.data || r.data.length < page) break;
@@ -38,7 +41,7 @@
       };
 
       const [custs, prints, counters, contracts, meetings, prices, archive] = await Promise.all([
-        fetchAll('rental_customers'),
+        fetchAll('rental_customers', q => q.is('archived_at', null)),
         fetchAll('rental_printers'),
         fetchAll('rental_counters'),
         fetchAll('rental_contracts'),
