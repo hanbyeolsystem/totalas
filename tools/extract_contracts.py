@@ -57,15 +57,22 @@ def extract_contract(xlsx_path):
         return None, "계약서 시트 없음"
     ws = wb['계약서']
 
-    company_top = clean(ws.cell(2, 3).value)
+    # 실제 셀 위치: 라벨이 C10, 값이 C12 (C11은 비어있음)
+    def right_val(r):
+        v = ws.cell(r, 12).value
+        if v is None or not str(v).strip():
+            v = ws.cell(r, 11).value
+        return clean(v)
+
+    company_top = clean(ws.cell(2, 3).value) or clean(ws.cell(2, 2).value)
     company     = clean(ws.cell(5, 5).value) or company_top
-    biz_no      = clean(ws.cell(5, 11).value)
+    biz_no      = right_val(5)
     requester   = clean(ws.cell(6, 5).value)
-    mobile      = clean(ws.cell(6, 11).value)
+    mobile      = right_val(6)
     address     = clean(ws.cell(7, 5).value)
-    tel_fax     = clean(ws.cell(7, 11).value)
+    tel_fax     = right_val(7)
     invoice_kind= clean(ws.cell(8, 5).value)
-    email       = clean(ws.cell(8, 11).value)
+    email       = right_val(8)
 
     items = []
     for r in (11, 12, 13, 14):

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>가격표 — 한별시스템 임대관리</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+</head>
+<body>
+
+<button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="메뉴">☰</button>
+
+<div class="app-layout">
+
+  <aside class="sidebar" id="sidebar">
+    <a href="index.html" class="sidebar-brand">
+      <span class="brand-mark">🖨</span>
+      <span class="brand-text">한별 임대</span>
+    </a>
+    <div class="sidebar-section-label">임대 관리</div>
+    <nav class="sidebar-nav">
+      <a href="index.html"><span class="nav-icon">🏠</span><span>임대홈</span></a>
+      <a href="customers.html"><span class="nav-icon">👥</span><span>임대거래처</span></a>
+      <a href="contracts.html"><span class="nav-icon">📋</span><span>임대계약서</span></a>
+      <a href="counters.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
+      <a href="#"><span class="nav-icon">💰</span><span>임대추가요금청구</span></a>
+      <a href="prices.html" class="active"><span class="nav-icon">💵</span><span>가격표</span></a>
+      <a href="meetings.html"><span class="nav-icon">🎙</span><span>음성미팅관리</span></a>
+      <a href="archive.html"><span class="nav-icon">📁</span><span>고객자료실</span></a>
+    </nav>
+    <div class="sidebar-foot">한별시스템<br>053-588-7119</div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <div class="main-area">
+    <main class="container prices-page">
+
+      <div class="page-head">
+        <div>
+          <h1>💵 가격표</h1>
+          <p class="muted" style="margin:2px 0 0 0;">판매 제품·부품 가격표를 게시판 형태로 관리합니다. 클릭하면 바로 열어볼 수 있습니다.</p>
+        </div>
+        <div class="page-head-actions">
+          <button class="btn primary" id="btn-write">+ 글쓰기</button>
+        </div>
+      </div>
+
+      <!-- 필터 탭 -->
+      <div class="cat-tabs prices-tabs">
+        <button class="cat-tab active" data-cat="all">📋 전체 <span class="cat-count" id="cnt-all">0</span></button>
+        <button class="cat-tab" data-cat="product">🛒 판매제품 <span class="cat-count" id="cnt-product">0</span></button>
+        <button class="cat-tab" data-cat="part">⚙ 부품 <span class="cat-count" id="cnt-part">0</span></button>
+      </div>
+
+      <div class="prices-toolbar">
+        <input type="text" id="prices-search" placeholder="🔍 제목·메모 검색">
+        <select id="prices-sort">
+          <option value="recent">최신순</option>
+          <option value="title">제목순</option>
+        </select>
+      </div>
+
+      <!-- 게시판 -->
+      <div class="board-wrap card">
+        <table class="board-table">
+          <thead>
+            <tr>
+              <th style="width:60px;">#</th>
+              <th style="width:90px;">분류</th>
+              <th>제목</th>
+              <th style="width:90px;">첨부</th>
+              <th style="width:110px;">등록일</th>
+              <th style="width:120px;"></th>
+            </tr>
+          </thead>
+          <tbody id="board-tbody"></tbody>
+        </table>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<div id="modal-backdrop" class="modal-backdrop hidden">
+  <div class="modal-box wide" id="modal-box"></div>
+</div>
+
+<!-- 글쓰기/수정 모달 -->
+<template id="tpl-price-modal">
+  <h3 id="price-modal-title">+ 가격표 등록</h3>
+  <form class="cust-form" id="price-form" autocomplete="off">
+    <div class="form-row two">
+      <label><span>분류 *</span>
+        <select name="category" id="p-cat" required>
+          <option value="product">🛒 판매제품</option>
+          <option value="part">⚙ 부품</option>
+        </select>
+      </label>
+      <label><span>작성자</span>
+        <input name="author" id="p-author" placeholder="홍길동" value="김상환">
+      </label>
+    </div>
+    <div class="form-row">
+      <label><span>제목 *</span>
+        <input name="title" id="p-title" required placeholder="예: 2026년 5월 복합기 가격표 / 토너 단가표">
+      </label>
+    </div>
+
+    <fieldset>
+      <legend>파일 업로드 <small class="muted-small">(PDF·엑셀·이미지)</small></legend>
+      <div class="audio-drop" id="price-drop">
+        <div class="muted-small">PDF / xlsx / xls / 이미지 드래그 또는 클릭</div>
+        <input type="file" id="p-file" accept=".pdf,.xlsx,.xls,.csv,image/*" hidden>
+      </div>
+      <div id="price-preview" class="hidden"></div>
+    </fieldset>
+
+    <div class="form-row">
+      <label><span>설명 (선택)</span>
+        <textarea name="memo" id="p-memo" rows="3" placeholder="가격 변경 내역, 적용 기간 등"></textarea>
+      </label>
+    </div>
+  </form>
+  <div class="modal-actions">
+    <button class="btn ghost" data-close>취소</button>
+    <button class="btn primary" id="price-save">등록</button>
+  </div>
+</template>
+
+<!-- 상세보기 모달 -->
+<template id="tpl-price-view">
+  <div class="lightbox-head">
+    <h3 id="pv-title">가격표</h3>
+    <div>
+      <button class="btn ghost small" id="pv-edit">✏️ 수정</button>
+      <button class="btn ghost small" id="pv-download">📥 다운로드</button>
+      <button class="btn ghost small" data-close>닫기</button>
+    </div>
+  </div>
+  <div class="price-view-meta muted-small" id="pv-meta"></div>
+  <div class="price-view-body" id="pv-body">로딩 중…</div>
+</template>
+
+<script>
+document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('show');
+});
+document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
+});
+</script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="db.js"></script>
+<script src="app.js"></script>
+<script src="prices.js"></script>
+</body>
+</html>

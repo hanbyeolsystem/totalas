@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>거래처 관리 — 한별시스템 임대관리</title>
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script src="auth.js"></script>
+</head>
+<body>
+
+<button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="메뉴">☰</button>
+
+<div class="app-layout">
+
+  <aside class="sidebar" id="sidebar">
+    <a href="index.html" class="sidebar-brand">
+      <span class="brand-mark">🖨</span>
+      <span class="brand-text">한별 임대</span>
+    </a>
+    <div class="sidebar-section-label">임대 관리</div>
+    <nav class="sidebar-nav">
+      <a href="index.html"><span class="nav-icon">🏠</span><span>임대홈</span></a>
+      <a href="customers.html" class="active"><span class="nav-icon">👥</span><span>임대거래처</span></a>
+      <a href="contracts.html"><span class="nav-icon">📋</span><span>임대계약서</span></a>
+      <a href="counters.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
+      <a href="#"><span class="nav-icon">💰</span><span>임대추가요금청구</span></a>
+      <a href="prices.html"><span class="nav-icon">💵</span><span>가격표</span></a>
+      <a href="meetings.html"><span class="nav-icon">🎙</span><span>음성미팅관리</span></a>
+      <a href="archive.html"><span class="nav-icon">📁</span><span>고객자료실</span></a>
+    </nav>
+    <div class="sidebar-foot">한별시스템<br>053-588-7119</div>
+  </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+  <div class="main-area">
+<main class="container customers-page">
+
+  <!-- 페이지 헤더 -->
+  <div class="page-head">
+    <div>
+      <h1>거래처 관리</h1>
+      <p class="muted" style="margin:2px 0 0 0;">임대 고객 정보, 연결된 프린터, 단가 / 계약 정보를 관리합니다.</p>
+    </div>
+    <div class="page-head-actions">
+      <button class="btn ghost" id="btn-asms-link" title="접수관리툴 ASMS 연동">🔗 <span id="asms-status">접수관리툴 연동</span></button>
+      <button class="btn ghost" id="btn-ocr">📇 명함 / 사업자등록증</button>
+      <button class="btn ghost" id="btn-seed" title="Supabase에서 최신 데이터 다시 불러오기">🔄 새로고침</button>
+      <button class="btn ghost" id="btn-export">📥 데이터 내보내기</button>
+      <button class="btn ghost" id="btn-nas-backup">🗄 NAS 백업 (zip)</button>
+      <button class="btn primary" id="btn-add">+ 거래처 추가</button>
+    </div>
+  </div>
+
+  <!-- 보안 안내 배너 -->
+  <div class="security-banner">
+    <span class="lock-icon">🔒</span>
+    <div class="security-text">
+      <strong>개인정보 보안 안내</strong>
+      신분증 / 사업자등록증 / 통장사본은 민감 정보입니다.
+      <strong>이미지는 이 PC의 브라우저에만 저장</strong>되며 외부로 전송되지 않습니다.
+      <span>정기적으로 <strong>"🗄 NAS 백업"</strong> 클릭 → 다운로드한 zip을 NAS의 <code>임대고객관리</code> 폴더에 풀어 보관하세요.</span>
+    </div>
+  </div>
+
+  <!-- 본문: 좌측 리스트 + 우측 상세 -->
+  <div class="cust-layout">
+    <!-- 좌측: 거래처 리스트 -->
+    <aside class="cust-list-wrap card">
+      <div class="cust-list-toolbar">
+        <input type="text" id="cust-search" placeholder="🔍 거래처명·대표자 검색">
+        <select id="cust-sort">
+          <option value="name">이름순</option>
+          <option value="recent">최근 등록순</option>
+          <option value="printers">프린터 많은순</option>
+        </select>
+      </div>
+      <div class="cust-list-meta">
+        <span id="cust-count">0곳</span>
+      </div>
+      <ul class="cust-list" id="cust-list">
+        <!-- 동적 생성 -->
+      </ul>
+    </aside>
+
+    <!-- 우측: 상세 영역 -->
+    <section class="cust-detail" id="cust-detail">
+      <!-- 빈 상태 -->
+      <div class="cust-empty">
+        <div class="cust-empty-icon">👈</div>
+        <div class="cust-empty-title">거래처를 선택하거나</div>
+        <div class="cust-empty-sub muted">우측 상단에서 새 거래처 추가, 명함 / 사업자등록증 OCR 등록</div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- ============================================ -->
+<!-- 모달: 거래처 추가 / 수정 -->
+<!-- ============================================ -->
+<div id="modal-backdrop" class="modal-backdrop hidden">
+  <div class="modal-box wide" id="modal-box"></div>
+</div>
+
+<!-- 명함 OCR 모달용 템플릿 (script src="app.js" 안에서 사용) -->
+<template id="tpl-ocr-modal">
+  <h3>📇 명함 / 사업자등록증 OCR 등록</h3>
+  <p class="muted" style="margin-bottom:14px;font-size:13px;">이미지를 끌어다 놓으면 거래처 정보를 자동으로 추출합니다.</p>
+
+  <div class="ocr-grid">
+    <div class="ocr-drop" id="ocr-drop">
+      <div class="ocr-drop-inner">
+        <div class="qr-drop-icon">📷</div>
+        <div>이미지 드래그 / 클릭으로 선택</div>
+        <input type="file" id="ocr-file" accept="image/*" hidden>
+      </div>
+    </div>
+    <div class="ocr-preview" id="ocr-preview">
+      <div class="muted" style="text-align:center;font-size:12px;">미리보기</div>
+    </div>
+  </div>
+
+  <div id="ocr-result" class="ocr-result hidden">
+    <div class="ocr-status muted" id="ocr-status">분석 중…</div>
+    <form class="cust-form" id="ocr-form" autocomplete="off">
+      <div class="form-row two">
+        <label><span>상호 *</span><input name="company" required></label>
+        <label><span>대표자명</span><input name="ceo"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>사업자등록번호</span><input name="biz_no" placeholder="000-00-00000"></label>
+        <label><span>법인등록번호</span><input name="corp_no"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>업태</span><input name="biz_type"></label>
+        <label><span>종목</span><input name="biz_item"></label>
+      </div>
+      <div class="form-row">
+        <label><span>주소</span><input name="address"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>연락처</span><input name="phone" placeholder="010-0000-0000"></label>
+        <label><span>팩스</span><input name="fax"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>이메일</span><input name="email" type="email"></label>
+        <label><span>카카오톡 ID</span><input name="kakao"></label>
+      </div>
+      <div class="form-row">
+        <label><span>메모</span><textarea name="memo" rows="2"></textarea></label>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-actions">
+    <button class="btn ghost" data-close>취소</button>
+    <button class="btn primary" id="ocr-save" disabled>거래처 등록</button>
+  </div>
+</template>
+
+<!-- 거래처 추가/편집 모달 -->
+<template id="tpl-cust-modal">
+  <h3 id="cust-modal-title">+ 거래처 추가</h3>
+  <div style="display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap;">
+    <button type="button" class="btn ghost small" id="btn-asms-pick">🔗 접수관리툴에서 가져오기</button>
+    <span class="muted-small" id="asms-link-info" style="align-self:center;"></span>
+  </div>
+  <form class="cust-form" id="cust-form" autocomplete="off">
+    <fieldset>
+      <legend>기본 정보</legend>
+      <div class="form-row two">
+        <label><span>상호 *</span><input name="company" required></label>
+        <label><span>대표자명</span><input name="ceo"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>사업자등록번호</span><input name="biz_no" placeholder="000-00-00000"></label>
+        <label><span>법인등록번호</span><input name="corp_no"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>업태</span><input name="biz_type"></label>
+        <label><span>종목</span><input name="biz_item"></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>연락처</legend>
+      <div class="form-row">
+        <label><span>주소</span><input name="address"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>연락처</span><input name="phone"></label>
+        <label><span>팩스</span><input name="fax"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>이메일</span><input name="email" type="email"></label>
+        <label><span>카카오톡 ID</span><input name="kakao"></label>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>첨부 서류 <span class="muted-small">(이미지)</span></legend>
+      <p class="muted-small" style="margin: 0 0 10px 0;">🔒 이미지는 이 PC 브라우저에만 저장됩니다 (외부 전송 X). 정기 NAS 백업 권장.</p>
+      <div class="att-slots" id="att-slots">
+        <!-- 4 슬롯 동적 생성 -->
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>메모</legend>
+      <div class="form-row">
+        <label><textarea name="memo" rows="3" placeholder="특이사항, 결제 조건 등"></textarea></label>
+      </div>
+    </fieldset>
+  </form>
+  <div class="modal-actions">
+    <button class="btn ghost" data-close>취소</button>
+    <button class="btn primary" id="cust-save">저장</button>
+  </div>
+</template>
+
+<!-- ASMS 연동 모달 (로그인 + 검색 + 가져오기) -->
+<template id="tpl-asms-modal">
+  <h3 id="asms-modal-title">🔗 접수관리툴(ASMS) 연동</h3>
+
+  <div id="asms-login-area">
+    <p class="muted" style="font-size:13px; margin-bottom:14px;">
+      ASMS 사이트와 동일한 계정으로 로그인하세요. 로그인 정보는 이 브라우저에만 저장됩니다.
+    </p>
+    <div class="form-row">
+      <label><span>이메일 (예: admin@asms.local)</span><input type="email" id="asms-email" autocomplete="username"></label>
+    </div>
+    <div class="form-row">
+      <label><span>비밀번호</span><input type="password" id="asms-password" autocomplete="current-password"></label>
+    </div>
+    <div id="asms-login-msg" class="muted-small" style="color:var(--danger);"></div>
+  </div>
+
+  <div id="asms-search-area" class="hidden">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+      <span class="muted-small" id="asms-user-label"></span>
+      <button type="button" class="btn ghost small" id="asms-logout-btn">로그아웃</button>
+    </div>
+    <div class="form-row">
+      <label><span>고객명·전화·휴대폰 검색</span>
+        <input type="text" id="asms-keyword" placeholder="예: 두일전기 또는 010-...">
+      </label>
+    </div>
+    <div id="asms-results" class="asms-results">
+      <div class="muted-small" style="text-align:center; padding:20px;">검색어를 입력하세요</div>
+    </div>
+  </div>
+
+  <div class="modal-actions">
+    <button class="btn ghost" data-close>닫기</button>
+    <button class="btn primary" id="asms-login-btn">로그인</button>
+  </div>
+</template>
+
+<!-- 이미지 lightbox 모달 -->
+<template id="tpl-lightbox">
+  <div class="lightbox-head">
+    <h3 id="lb-title">첨부 미리보기</h3>
+    <div>
+      <button class="btn ghost small" id="lb-download">📥 다운로드</button>
+      <button class="btn ghost small" data-close>닫기</button>
+    </div>
+  </div>
+  <div class="lightbox-body">
+    <img id="lb-img" alt="">
+  </div>
+</template>
+
+  </div>
+</div>
+
+<script>
+document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebar-backdrop').classList.toggle('show');
+});
+document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
+});
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="db.js"></script>
+<script src="asms-sync.js"></script>
+<script src="db-supa.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
