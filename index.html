@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<script>location.replace('asms.html');</script>
-<title>이동 중…</title>
+<title>임대홈 — 한별시스템 임대관리</title>
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
@@ -16,156 +15,121 @@
 
 <div class="app-layout">
 
-  <!-- ===== 사이드바 ===== -->
   <aside class="sidebar" id="sidebar">
     <a href="index.html" class="sidebar-brand">
       <span class="brand-mark">🖨</span>
       <span class="brand-text">한별시스템</span>
     </a>
     <a href="asms.html" class="sidebar-tool">
-      <span class="nav-icon">🛠</span>
-      <span>접수관리툴</span>
+      <span class="nav-icon">🛠</span><span>접수관리툴</span>
     </a>
     <a href="errorcode.html" class="sidebar-tool">
-      <span class="nav-icon">🔧</span>
-      <span>에러코드</span>
+      <span class="nav-icon">🔧</span><span>에러코드</span>
     </a>
     <div class="sidebar-section-label">임대 관리</div>
     <nav class="sidebar-nav">
-      <a href="index.html" class="active">
-        <span class="nav-icon">🏠</span>
-        <span>임대홈</span>
-      </a>
-      <a href="customers.html">
-        <span class="nav-icon">👥</span>
-        <span>임대거래처</span>
-      </a>
-      <a href="contracts.html">
-        <span class="nav-icon">📋</span>
-        <span>임대계약서</span>
-      </a>
-      <a href="counters.html">
-        <span class="nav-icon">🖨</span>
-        <span>임대카운터</span>
-      </a>
-      <a href="#">
-        <span class="nav-icon">💰</span>
-        <span>임대추가요금청구</span>
-      </a>
-      <a href="prices.html">
-        <span class="nav-icon">💵</span>
-        <span>가격표</span>
-      </a>
-      <a href="meetings.html">
-        <span class="nav-icon">🎙</span>
-        <span>음성미팅관리</span>
-      </a>
-      <a href="archive.html">
-        <span class="nav-icon">📁</span>
-        <span>고객자료실</span>
-      </a>
+      <a href="index.html" class="active"><span class="nav-icon">🏠</span><span>임대홈</span></a>
+      <a href="customers.html"><span class="nav-icon">👥</span><span>임대거래처</span></a>
+      <a href="contracts.html"><span class="nav-icon">📋</span><span>임대계약서</span></a>
+      <a href="counters.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
+      <a href="#"><span class="nav-icon">💰</span><span>임대추가요금청구</span></a>
+      <a href="prices.html"><span class="nav-icon">💵</span><span>가격표</span></a>
+      <a href="meetings.html"><span class="nav-icon">🎙</span><span>음성미팅관리</span></a>
+      <a href="archive.html"><span class="nav-icon">📁</span><span>고객자료실</span></a>
       <a href="admin-users.html" data-role-only="admin"><span class="nav-icon">👑</span><span>사용자 관리</span></a>
     </nav>
-    <div class="sidebar-foot">
-      한별시스템<br>
-      053-588-7119
-    </div>
+    <div class="sidebar-foot">한별시스템<br>053-588-7119</div>
   </aside>
   <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
 
-  <!-- ===== 메인 ===== -->
   <div class="main-area">
-    <main class="container">
+    <main class="container home-page">
 
-      <!-- 빠른 등록 -->
-      <section class="quick-register card">
-        <div class="qr-text">
-          <h2>📇 명함 / 사업자등록증으로 빠른 등록</h2>
-          <p>이미지를 끌어다 놓으면 거래처 정보가 자동으로 채워집니다.<br>
-             <span class="muted">상호 · 대표자 · 사업자등록번호 · 주소 · 연락처 추출</span></p>
+      <div class="page-head">
+        <div>
+          <h1>🏠 임대 현황</h1>
+          <p class="muted" style="margin:2px 0 0 0;">전체 거래처와 수익 구조 한눈에 보기</p>
         </div>
-        <div class="qr-drop" id="drop-zone">
-          <div class="qr-drop-inner">
-            <div class="qr-drop-icon">📥</div>
-            <div class="qr-drop-title">여기에 이미지 끌어다 놓기</div>
-            <div class="qr-drop-hint">또는 <label class="link" for="qr-file">파일 선택</label></div>
-            <input type="file" id="qr-file" accept="image/*" hidden>
-          </div>
+        <div class="page-head-actions">
+          <a href="customers.html" class="btn ghost">👥 거래처</a>
+          <a href="contracts.html" class="btn ghost">📋 계약서</a>
+          <a href="counters.html" class="btn ghost">🖨 카운터</a>
         </div>
-      </section>
+      </div>
 
-      <!-- 현황 요약 -->
+      <!-- 통계 카드 -->
       <section class="stats">
         <div class="stat-card">
-          <div class="stat-label">임대 거래처</div>
-          <div class="stat-value">0<span class="unit">곳</span></div>
-          <div class="stat-sub muted">이번 달 신규 +0</div>
+          <div class="stat-label">활성 거래처</div>
+          <div class="stat-value" id="s-cust">—</div>
+          <div class="stat-sub muted" id="s-cust-sub">로드 중…</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">임대 프린터</div>
-          <div class="stat-value">0<span class="unit">대</span></div>
-          <div class="stat-sub muted">활성 0 / 회수 0</div>
+          <div class="stat-label">매칭 시리얼</div>
+          <div class="stat-value" id="s-serial">—</div>
+          <div class="stat-sub muted" id="s-serial-sub">로드 중…</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">이번 달 청구 예정</div>
-          <div class="stat-value primary">₩0</div>
-          <div class="stat-sub muted">대상 0곳</div>
+          <div class="stat-label">월 기본료 합계</div>
+          <div class="stat-value primary" id="s-rev">—</div>
+          <div class="stat-sub muted" id="s-rev-sub">로드 중…</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">계약 만료 예정</div>
-          <div class="stat-value warn">0<span class="unit">건</span></div>
-          <div class="stat-sub muted">90일 이내</div>
+          <div class="stat-label">최신월 카운터</div>
+          <div class="stat-value" id="s-latest">—</div>
+          <div class="stat-sub muted" id="s-latest-sub">로드 중…</div>
         </div>
       </section>
 
-      <!-- 핵심 메뉴 -->
-      <section class="menu-grid">
-        <a class="menu-card" href="customers.html">
-          <div class="menu-icon" style="background:#dbeafe; color:#1d4ed8;">👥</div>
-          <div class="menu-body">
-            <div class="menu-title">임대거래처</div>
-            <div class="menu-desc">임대 고객 등록·수정·삭제. 명함 OCR로 자동 입력. 신분증 / 사업자등록증 안전 보관.</div>
+      <!-- 거래처 한눈에 -->
+      <section class="card" style="padding:14px; margin-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:10px;">
+          <h3 style="margin:0; display:flex; align-items:center; gap:6px;">
+            거래처 한눈에 <span class="muted-small" id="cust-table-count" style="font-weight:400;"></span>
+          </h3>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <input type="text" id="home-search" placeholder="🔍 회사명·대표자·주소 검색" style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; min-width:200px;">
+            <select id="home-sort" style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px;">
+              <option value="fee">기본료 많은순</option>
+              <option value="serials">시리얼 많은순</option>
+              <option value="name">이름순</option>
+              <option value="recent">최근 등록순</option>
+            </select>
+            <label style="display:flex; align-items:center; gap:4px; font-size:12.5px; cursor:pointer;">
+              <input type="checkbox" id="home-only-active"> 활성만 (시리얼≥1)
+            </label>
           </div>
-          <div class="menu-arrow">→</div>
-        </a>
-
-        <a class="menu-card" href="contracts.html">
-          <div class="menu-icon" style="background:#fef3c7; color:#b45309;">📋</div>
-          <div class="menu-body">
-            <div class="menu-title">임대계약서</div>
-            <div class="menu-desc">3페이지 렌탈 계약서 자동 작성. 거래처 선택 시 자동 채움. PDF 출력.</div>
-          </div>
-          <div class="menu-arrow">→</div>
-        </a>
-
-        <a class="menu-card" href="#">
-          <div class="menu-icon" style="background:#dcfce7; color:#15803d;">🖨</div>
-          <div class="menu-body">
-            <div class="menu-title">임대카운터</div>
-            <div class="menu-desc">매월 자동 수집된 카운터 확인·보정. 시리얼별 누적 이력 관리.</div>
-          </div>
-          <div class="menu-arrow">→</div>
-        </a>
-
-        <a class="menu-card" href="#">
-          <div class="menu-icon" style="background:#fce7f3; color:#be185d;">💰</div>
-          <div class="menu-body">
-            <div class="menu-title">임대추가요금청구</div>
-            <div class="menu-desc">월별 추가 사용량 자동 계산. 청구서 발행·전송. 1년치 / 기간별 출력.</div>
-          </div>
-          <div class="menu-arrow">→</div>
-        </a>
+        </div>
+        <div style="overflow-x:auto;">
+          <table id="home-cust-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+            <thead>
+              <tr style="background:#f8fafc; text-align:left;">
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border);">회사명</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border);">대표자</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">월 기본료</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">시리얼</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">최신 BW</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">최신 CO</th>
+              </tr>
+            </thead>
+            <tbody id="home-cust-tbody"></tbody>
+          </table>
+        </div>
       </section>
 
-      <!-- 최근 활동 -->
-      <section class="recent card">
-        <div class="recent-head">
-          <h3>최근 활동</h3>
-          <a href="#" class="muted">전체 보기 →</a>
+      <!-- 수익 구조 -->
+      <section class="card" style="padding:14px; margin-top:14px;">
+        <h3 style="margin:0 0 12px 0;">💰 수익 구조</h3>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:18px;">
+          <div>
+            <h4 style="margin:0 0 8px 0; font-size:13px; color:var(--muted);">기본료 구간 분포</h4>
+            <div id="home-rev-bins"></div>
+          </div>
+          <div>
+            <h4 style="margin:0 0 8px 0; font-size:13px; color:var(--muted);">기본료 Top 10</h4>
+            <div id="home-rev-top"></div>
+          </div>
         </div>
-        <ul class="activity">
-          <li class="empty muted">활동 내역이 표시됩니다 (거래처 등록, 카운터 수집, 청구서 발행 등)</li>
-        </ul>
       </section>
 
     </main>
@@ -179,7 +143,6 @@
 </div>
 
 <script>
-// 모바일 사이드바 토글
 document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
   document.getElementById('sidebar').classList.toggle('open');
   document.getElementById('sidebar-backdrop').classList.toggle('show');
@@ -189,5 +152,9 @@ document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
   document.getElementById('sidebar-backdrop').classList.remove('show');
 });
 </script>
+<script src="db.js"></script>
+<script src="db-supa.js"></script>
+<script src="app.js"></script>
+<script src="index.js"></script>
 </body>
 </html>
