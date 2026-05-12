@@ -312,7 +312,7 @@
             : String(c.notes))
         : '';
       return `
-        <tr>
+        <tr class="cust-row" data-cid="${escapeHtml(c.id)}" title="클릭하여 상세 보기">
           <td>${idx + 1}</td>
           <td><strong>${escapeHtml(c.company || '–')}</strong>${c.contact_name ? `<br><span class="muted-cell" style="font-size:11.5px;">${escapeHtml(c.contact_name)}</span>` : ''}</td>
           <td class="num">${s.items.length.toLocaleString()}</td>
@@ -587,6 +587,21 @@
       });
     });
 
+    // 거래처 행 클릭 → 상세 모달 (이벤트 위임)
+    document.addEventListener('click', (e) => {
+      const row = e.target.closest('.cust-row');
+      if (row && row.dataset.cid) openCustomerDetail(row.dataset.cid);
+    });
+    // 모달 닫기: backdrop / X 버튼 / ESC
+    document.addEventListener('click', (e) => {
+      if (e.target.id === 'rs-modal-backdrop' || e.target.closest('[data-modal-close]')) {
+        closeCustomerDetail();
+      }
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeCustomerDetail();
+    });
+
     // 거래처별 필터
     const debCust = debounce(() => renderCustomersTab(), 150);
     $('#cf-q').addEventListener('input', e => {
@@ -815,6 +830,127 @@
       downloadCsv(`임대현황_메모_${date}.csv`, csv);
       return;
     }
+  }
+
+  // ========================================================
+  // 거래처 상세 모달
+  // ========================================================
+  function openCustomerDetail(cid) {
+    const c = state.customers.find(x => x.id === cid);
+    if (!c) return;
+    const assignMap = buildItemAssignMap();
+    const items = state.items
+      .filter(it => {
+        const a = assignMap.get(it.id);
+        return a && a.customer_id === cid;
+      })
+      .sort((a, b) => (b.install_date || '').localeCompare(a.install_date || ''));
+
+    // 카테고리별 자산 수 집계
+    const byCat = {};
+    items.forEach(it => {
+      const cat = it.category || '기타';
+      byCat[cat] = (byCat[cat] || 0) + 1;
+    });
+    const catDist = Object.entries(byCat).sort((a,b) => b[1]-a[1])
+      .map(([k,v]) => `<span class="mini-pill ${escapeHtml(k)}">${escapeHtml(k)} ${v}</span>`).join(' ');
+
+    // 월 임대료 / 보증금 / 최대 노후도 계산
+    let monthlyTotal = 0;
+    items.forEach(it => {
+      const a = assignMap.get(it.id);
+      if (a && a.monthly_fee) monthlyTotal += Number(a.monthly_fee) || 0;
+    });
+    const maxAge = items.reduce((m, it) => {
+      const ag = computeAgeMonths(it);
+      return ag != null && ag > m ? ag : m;
+    }, 0);
+
+    // 자산 표
+    const itemRows = items.length === 0
+      ? `<tr><td colspan="8" class="empty-row">배정된 자산이 없습니다.</td></tr>`
+      : items.map((it, i) => {
+          const a = assignMap.get(it.id) || {};
+          const ag = computeAgeMonths(it);
+          return `<tr>
+            <td>${i+1}</td>
+            <td><span class="mini-pill ${escapeHtml(it.category||'기타')}">${escapeHtml(it.category||'기타')}</span></td>
+            <td>${escapeHtml(it.subtype || '–')}</td>
+            <td><strong>${escapeHtml(it.brand || '')} ${escapeHtml(it.model || '–')}</strong>${it.serial ? `<br><span class="muted-cell" style="font-size:11px;">${escapeHtml(it.serial)}</span>` : ''}</td>
+            <td class="num">${escapeHtml(it.install_date || '–')}</td>
+            <td class="num">${agePillHtml(ag)}</td>
+            <td class="num">${a.monthly_fee ? fmtMoney(a.monthly_fee) : '<span class="muted-cell">–</span>'}</td>
+            <td>${statusTagHtml(it.status)}</td>
+          </tr>`;
+        }).join('');
+
+    let modal = document.getElementById('rs-modal-backdrop');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'rs-modal-backdrop';
+      modal.className = 'rs-modal-backdrop';
+      document.body.appendChild(modal);
+    }
+    modal.innerHTML = `
+      <div class="rs-modal" role="dialog" aria-modal="true" aria-labelledby="rs-modal-title">
+        <div class="rs-modal-head">
+          <div>
+            <h2 id="rs-modal-title" style="margin:0; font-size:18px;">🏢 ${escapeHtml(c.company || '거래처')}</h2>
+            <div class="muted-small" style="margin-top:2px;">
+              ${c.contact_name ? '담당: ' + escapeHtml(c.contact_name) + ' · ' : ''}자산 ${items.length}건 · 월 ${fmtMoney(monthlyTotal)}
+              ${maxAge ? ' · 최대 노후 ' + maxAge + '개월' : ''}
+            </div>
+          </div>
+          <button type="button" class="btn ghost small" data-modal-close aria-label="닫기">✕</button>
+        </div>
+
+        <div class="rs-modal-body">
+          <h3 class="rs-h3">📋 기본 정보</h3>
+          <div class="rs-info-grid">
+            <div><label>회사명</label><div>${escapeHtml(c.company || '–')}</div></div>
+            <div><label>담당자</label><div>${escapeHtml(c.contact_name || '–')}</div></div>
+            <div><label>전화</label><div>${escapeHtml(c.phone || '–')}</div></div>
+            <div><label>휴대폰</label><div>${escapeHtml(c.mobile || '–')}</div></div>
+            <div><label>이메일</label><div>${escapeHtml(c.email || '–')}</div></div>
+            <div><label>사업자번호</label><div>${escapeHtml(c.biz_no || '–')}</div></div>
+            <div style="grid-column:1/-1;"><label>주소</label><div>${escapeHtml(c.address || '–')}</div></div>
+            <div><label>결제방식</label><div>${payTagHtml(c.payment_type)}</div></div>
+            <div><label>청구일</label><div>${c.invoice_day ? escapeHtml(String(c.invoice_day)) + '일' : '–'}</div></div>
+            <div><label>보증금</label><div>${c.deposit ? fmtMoney(c.deposit) : '–'}</div></div>
+            <div><label>등록일</label><div>${(c.created_at || '').slice(0,10) || '–'}</div></div>
+          </div>
+
+          <h3 class="rs-h3">📦 보유 자산 (${items.length}건)</h3>
+          ${catDist ? `<div style="margin:-6px 0 8px 0;">${catDist}</div>` : ''}
+          <div class="scroll-x">
+            <table class="data-table">
+              <thead><tr>
+                <th>#</th><th>카테고리</th><th>품목</th><th>브랜드/모델</th>
+                <th>도입일</th><th class="num">노후도</th><th class="num">월 임대료</th><th>상태</th>
+              </tr></thead>
+              <tbody>${itemRows}</tbody>
+            </table>
+          </div>
+
+          ${c.notes && c.notes.trim() ? `
+            <h3 class="rs-h3">📝 메모/특이사항</h3>
+            <div class="rs-notes">${escapeHtml(c.notes)}</div>
+          ` : ''}
+        </div>
+
+        <div class="rs-modal-foot">
+          <button type="button" class="btn ghost" data-modal-close>닫기</button>
+        </div>
+      </div>
+    `;
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeCustomerDetail() {
+    const modal = document.getElementById('rs-modal-backdrop');
+    if (modal) modal.classList.remove('show');
+    document.body.style.overflow = '';
   }
 
   // ========================================================
