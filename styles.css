@@ -2553,6 +2553,23 @@ select.cell-edit {
   margin-top: 8mm;
 }
 
+/* ===== Page 4: CMS 자동출금 이용신청서 ===== */
+.ct-cms-page .ct-cms-sub { color: #4b5563; }
+.ct-cms-section {
+  font-size: 12.5px;
+  margin: 10px 0 4px 0;
+  font-weight: 700;
+  color: #1f2937;
+}
+.ct-cms-tbl { margin-bottom: 6px; }
+.ct-cms-tbl th, .ct-cms-tbl td { padding: 6px 8px; font-size: 11px; }
+.ct-cms-kind label, .ct-cms-paymethod label { cursor: pointer; }
+.ct-cms-kind input[type="radio"], .ct-cms-paymethod input[type="radio"] {
+  width: 14px; height: 14px; margin-right: 4px; vertical-align: middle;
+}
+.ct-cms-page .ct-cms-list { font-size: 11.2px; line-height: 1.55; }
+.ct-cms-page .ct-cms-list li { margin-bottom: 5px; }
+
 /* ===== 편집 가능 입력 (.ed) ===== */
 .ct-input.ed {
   border: none;

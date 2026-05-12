@@ -212,6 +212,7 @@ function blankContract() {
       account_no: '',
       resident6: '',
       card_expiry: '',
+      apply_date: '',
     },
   };
 }
@@ -397,7 +398,7 @@ function renderDoc(c) {
         <input class="ct-input ed" data-bind="bank.holder" value="${escapeAttr(c.bank?.holder || '김상환(한별시스템)')}" style="width:170px">
       </p>
 
-      <div class="ct-page-footer no-print">— 페이지 1/3 —</div>
+      <div class="ct-page-footer no-print">— 페이지 1/4 —</div>
     </section>
 
     <!-- ============ 페이지 2: 이용약관 ============ -->
@@ -482,7 +483,7 @@ function renderDoc(c) {
       <h4>제10조【분쟁의 해결】</h4>
       <p>본 계약과 관련하여 발생하는 모든 분쟁은 "갑"과 "을"이 협의하여 해결한다. 단, 본 계약으로 인한 분쟁이 발생하여 소송이 필요한 경우 주소지 관할법원으로 한다.</p>
 
-      <div class="ct-page-footer no-print">— 페이지 2/3 —</div>
+      <div class="ct-page-footer no-print">— 페이지 2/4 —</div>
     </section>
 
     <!-- ============ 페이지 3: 자동이체 약관 + 부가사항 + 특약 ============ -->
@@ -533,7 +534,113 @@ function renderDoc(c) {
         </tr>
       </table>
 
-      <div class="ct-page-footer no-print">— 페이지 3/3 —</div>
+      <div class="ct-page-footer no-print">— 페이지 3/4 —</div>
+    </section>
+
+    <!-- ============ 페이지 4: CMS 자동출금 이용신청서 ============ -->
+    <section class="contract-page ct-cms-page">
+      <h2 class="ct-page-title" style="text-align:center;">CMS 자동출금 이용신청서</h2>
+      <p class="ct-cms-sub" style="text-align:center; margin:0 0 10mm 0; font-size:11pt;">
+        한별시스템 (이하 "을") 귀하
+      </p>
+
+      <!-- 신청 구분 -->
+      <div class="ct-cms-kind" style="display:flex; gap:18px; justify-content:center; margin-bottom:8mm; font-size:11pt;">
+        ${['신규','변경','해지'].map(k => `
+          <label style="display:inline-flex; align-items:center; gap:4px;">
+            <input type="radio" name="cms_kind" data-bind="cms.kind" value="${k}" ${(c.cms?.kind || '신규') === k ? 'checked' : ''}> ${k}
+          </label>
+        `).join('')}
+      </div>
+
+      <!-- 납부자(신청인) 정보 -->
+      <h4 class="ct-cms-section">■ 납부자 (신청인) 정보</h4>
+      <table class="ct-tbl ct-cms-tbl">
+        <colgroup><col style="width:22%"><col style="width:28%"><col style="width:22%"><col></colgroup>
+        <tr>
+          <th>고객번호</th>
+          <td><input class="ct-input ed" data-bind="cms.customer_no" value="${escapeAttr(c.cms?.customer_no || '')}" placeholder="(을 발급)"></td>
+          <th>자동이체 개시일</th>
+          <td><input class="ct-input ed" type="date" data-bind="cms.autopay_start" value="${escapeAttr(c.cms?.autopay_start || '')}"></td>
+        </tr>
+        <tr>
+          <th>자동이체 약정일</th>
+          <td colspan="3">매월 <input class="ct-input ed num" data-bind="cms.autopay_day" type="number" value="${c.cms?.autopay_day || 25}" style="width:60px;"> 일 (영업일 기준)</td>
+        </tr>
+        <tr>
+          <th>신청인(예금주) 성명</th>
+          <td><input class="ct-input ed" data-bind="cms.applicant_name" value="${escapeAttr(c.cms?.applicant_name || c.requester || '')}"></td>
+          <th>이메일</th>
+          <td><input class="ct-input ed" data-bind="cms.applicant_email" value="${escapeAttr(c.cms?.applicant_email || c.email || '')}"></td>
+        </tr>
+        <tr>
+          <th>주소</th>
+          <td colspan="3"><input class="ct-input ed" data-bind="cms.applicant_address" value="${escapeAttr(c.cms?.applicant_address || c.address || '')}"></td>
+        </tr>
+        <tr>
+          <th>연락처(유선)</th>
+          <td><input class="ct-input ed" data-bind="cms.applicant_contact" value="${escapeAttr(c.cms?.applicant_contact || c.tel_fax || '')}"></td>
+          <th>휴대폰</th>
+          <td><input class="ct-input ed" data-bind="cms.applicant_mobile" value="${escapeAttr(c.cms?.applicant_mobile || c.mobile || '')}"></td>
+        </tr>
+      </table>
+
+      <!-- 출금 방식 -->
+      <h4 class="ct-cms-section">■ 출금 정보</h4>
+      <div class="ct-cms-paymethod" style="margin:4px 0 6px 0; font-size:11pt;">
+        ${[{v:'cms', l:'CMS 자동이체 (예금계좌)'}, {v:'card', l:'신용카드 자동납부'}].map(o => `
+          <label style="display:inline-flex; align-items:center; gap:4px; margin-right:18px;">
+            <input type="radio" name="cms_pm" data-bind="cms.payment_method" value="${o.v}" ${(c.cms?.payment_method || 'cms') === o.v ? 'checked' : ''}> ${o.l}
+          </label>
+        `).join('')}
+      </div>
+      <table class="ct-tbl ct-cms-tbl">
+        <colgroup><col style="width:22%"><col style="width:28%"><col style="width:22%"><col></colgroup>
+        <tr>
+          <th>은행/카드사명</th>
+          <td><input class="ct-input ed" data-bind="cms.bank_name" value="${escapeAttr(c.cms?.bank_name || '')}"></td>
+          <th>사업자번호</th>
+          <td><input class="ct-input ed" data-bind="cms.biz_no" value="${escapeAttr(c.cms?.biz_no || c.biz_no || '')}"></td>
+        </tr>
+        <tr>
+          <th>예금주(카드명의)</th>
+          <td><input class="ct-input ed" data-bind="cms.holder" value="${escapeAttr(c.cms?.holder || '')}"></td>
+          <th>계좌(카드)번호</th>
+          <td><input class="ct-input ed" data-bind="cms.account_no" value="${escapeAttr(c.cms?.account_no || '')}"></td>
+        </tr>
+        <tr>
+          <th>주민번호 앞 6자리</th>
+          <td><input class="ct-input ed" data-bind="cms.resident6" value="${escapeAttr(c.cms?.resident6 || '')}" maxlength="6" placeholder="YYMMDD"></td>
+          <th>카드 유효기간</th>
+          <td><input class="ct-input ed" data-bind="cms.card_expiry" value="${escapeAttr(c.cms?.card_expiry || '')}" placeholder="MM/YY (신용카드 시)"></td>
+        </tr>
+      </table>
+
+      <!-- 동의 -->
+      <h4 class="ct-cms-section">■ 동의사항</h4>
+      <ol class="ct-cms-list">
+        <li><strong>자동이체 약관 동의</strong> — 본인은 페이지 3에 게재된 「자동이체 약관」 전문을 읽고 이해하였으며, 이에 동의합니다.</li>
+        <li><strong>개인정보 수집·이용 동의</strong> — 본 계약 이행 및 자동이체 처리 목적으로 성명·연락처·계좌(카드)정보·주민번호 앞 6자리를 수집·이용하는 것에 동의합니다. (보유기간: 계약 종료 후 3년)</li>
+        <li><strong>개인정보 제3자 제공 동의</strong> — 자동이체 처리를 위하여 금융결제원 및 해당 금융기관에 위 정보를 제공하는 것에 동의합니다.</li>
+        <li><strong>SMS·알림톡 수신 동의</strong> — 출금예정/결과·미납안내·계약 만기 안내 등 서비스 관련 문자 수신에 동의합니다. (수신거부 시 정상적인 안내가 어려울 수 있음)</li>
+      </ol>
+
+      <p class="ct-end-text">위 사항을 확인하고 자동출금 신청을 의뢰합니다.</p>
+      <p class="ct-date-line"><input class="ct-input ed date" type="date" data-bind="cms.apply_date" value="${escapeAttr(c.cms?.apply_date || c.contract_date || '')}"></p>
+
+      <table class="ct-tbl ct-tbl-final-sign">
+        <colgroup><col style="width:25%"><col></colgroup>
+        <tr>
+          <th>예금주 (카드명의자)</th>
+          <td class="ct-sign-cell"><strong>${escapeHtml(c.cms?.holder || '')}</strong> &nbsp;&nbsp; (인)</td>
+        </tr>
+        <tr>
+          <th>신청인 (납부자)</th>
+          <td class="ct-sign-cell"><strong>${escapeHtml(c.cms?.applicant_name || c.requester || '')}</strong> &nbsp;&nbsp; (서명)</td>
+        </tr>
+      </table>
+
+      <div class="ct-page-footer no-print">— 페이지 4/4 —</div>
     </section>
   `;
   $('#contract-doc').innerHTML = html;
@@ -650,7 +757,11 @@ function collectFormData() {
   document.querySelectorAll('[data-bind]').forEach(el => {
     const key = el.dataset.bind;
     let val;
-    if (el.type === 'checkbox') val = el.checked;
+    if (el.type === 'radio') {
+      if (!el.checked) return;  // 같은 name 그룹 중 선택된 것만 채택
+      val = el.value;
+    }
+    else if (el.type === 'checkbox') val = el.checked;
     else if (el.type === 'number') val = parseFloat(el.value) || 0;
     else val = el.value;
 
