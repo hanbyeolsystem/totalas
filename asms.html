@@ -45,9 +45,9 @@
 
   <div class="main-area errorcode-area">
     <div class="errorcode-toolbar">
-      <h1 class="errorcode-title"><span>🛠</span> 접수관리툴 (ASMS)</h1>
+      <h1 class="errorcode-title" id="frame-title"><span>🛠</span> 접수관리툴 (ASMS)</h1>
       <div class="errorcode-actions">
-        <a href="https://hanbyeolsystem.github.io/asms-web/" target="_blank" rel="noopener" class="btn ghost small" title="새 창에서 열기">↗ 새 창</a>
+        <a href="https://hanbyeolsystem.github.io/asms-web/" target="_blank" rel="noopener" class="btn ghost small" id="btn-open-new" title="새 창에서 열기">↗ 새 창</a>
         <button class="btn ghost small" id="btn-reload" title="새로고침">↻ 새로고침</button>
       </div>
     </div>
@@ -61,18 +61,74 @@
 </div>
 
 <script>
+const ASMS_HOME_URL = 'https://hanbyeolsystem.github.io/asms-web/';
+const iframe   = document.getElementById('asms-iframe');
+const title    = document.getElementById('frame-title');
+const openNew  = document.getElementById('btn-open-new');
+const sidebar  = document.getElementById('sidebar');
+const backdrop = document.getElementById('sidebar-backdrop');
+
 document.getElementById('mobile-menu-btn')?.addEventListener('click', () => {
-  document.getElementById('sidebar').classList.toggle('open');
-  document.getElementById('sidebar-backdrop').classList.toggle('show');
+  sidebar.classList.toggle('open');
+  backdrop.classList.toggle('show');
 });
-document.getElementById('sidebar-backdrop')?.addEventListener('click', () => {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('sidebar-backdrop').classList.remove('show');
+backdrop?.addEventListener('click', () => {
+  sidebar.classList.remove('open');
+  backdrop.classList.remove('show');
 });
 document.getElementById('btn-reload')?.addEventListener('click', () => {
-  const f = document.getElementById('asms-iframe');
-  f.src = f.src;
+  iframe.src = iframe.src;
 });
+
+/** 사이드바 메뉴 클릭 가로채기 — 페이지 이동 없이 iframe.src 만 변경. */
+function bindSidebarLinks() {
+  const links = sidebar.querySelectorAll('.sidebar-tool, .sidebar-nav a');
+  links.forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('http') || href.startsWith('#')) return;
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      links.forEach(x => x.classList.remove('active'));
+      a.classList.add('active');
+
+      // 타이틀 갱신
+      const icon  = a.querySelector('.nav-icon')?.textContent || '📄';
+      const label = a.querySelector('span:last-child')?.textContent || a.textContent.trim();
+      title.innerHTML = `<span>${icon}</span> ${label}`;
+
+      // iframe.src
+      let target;
+      if (href === 'asms.html') {
+        target = ASMS_HOME_URL;
+      } else {
+        // 같은 사이트의 페이지 — embed=1 파라미터 추가
+        const u = new URL(href, location.href);
+        u.searchParams.set('embed', '1');
+        target = u.toString();
+      }
+      iframe.src = target;
+      openNew.href = href === 'asms.html' ? ASMS_HOME_URL : new URL(href, location.href).toString();
+
+      // 모바일 사이드바 닫기
+      sidebar.classList.remove('open');
+      backdrop.classList.remove('show');
+
+      // 주소창에 #path 만 살짝 기록 (북마크/새로고침 시 복원)
+      history.replaceState(null, '', '#' + href);
+    });
+  });
+}
+
+/** 새로고침 시 #path 가 있으면 그 위치로 복원. */
+function restoreFromHash() {
+  const h = decodeURIComponent(location.hash.replace(/^#/, ''));
+  if (!h) return;
+  const a = sidebar.querySelector(`.sidebar-nav a[href="${h}"], .sidebar-tool[href="${h}"]`);
+  if (a) a.click();
+}
+
+bindSidebarLinks();
+restoreFromHash();
 </script>
 
 </body>

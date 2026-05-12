@@ -4,6 +4,13 @@
 // 의존: config.js (window.TOTALAS), supabase-js v2 UMD
 // ===========================================================
 (function(){
+  // embed 모드 표시 — asms.html iframe 안에서 띄울 때 자체 사이드바 숨김 (CSS rule)
+  if (new URLSearchParams(location.search).get('embed') === '1') {
+    if (document.body) document.body.setAttribute('data-embed', '1');
+    else document.addEventListener('DOMContentLoaded', () =>
+      document.body.setAttribute('data-embed', '1'));
+  }
+
   if (!window.supabase || !window.TOTALAS) {
     console.error('[auth] supabase-js 또는 config.js 가 먼저 로드돼야 합니다');
     return;
