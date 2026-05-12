@@ -5,19 +5,170 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>임대추가요금청구 — 한별시스템</title>
 <link rel="stylesheet" href="../styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
+<style>
+  /* ── 화면 전용 스타일 (페이지 한정) ── */
+  .rb-toolbar {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    margin-bottom: 14px;
+  }
+  .rb-toolbar input[type=month] {
+    padding: 7px 10px; font-size: 13px;
+    border: 1px solid var(--border-strong); border-radius: 8px;
+    background: #fff; font-family: inherit;
+  }
+  .rb-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 12px; margin-bottom: 18px;
+  }
+  .rb-layout {
+    display: grid; grid-template-columns: 360px 1fr; gap: 14px;
+    align-items: stretch;
+  }
+  @media (max-width: 920px) {
+    .rb-layout { grid-template-columns: 1fr; }
+  }
+  .rb-list-wrap {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 0; box-shadow: var(--shadow);
+    display: flex; flex-direction: column;
+    max-height: calc(100vh - 280px); overflow: hidden;
+  }
+  .rb-list-toolbar {
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 6px;
+  }
+  .rb-list-toolbar input {
+    flex: 1; padding: 7px 10px; border: 1px solid var(--border);
+    border-radius: 7px; font-size: 13px; background: #f8fafc; outline: none;
+  }
+  .rb-list-toolbar input:focus { background: #fff; border-color: var(--primary); }
+  .rb-list { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+  .rb-list-empty { padding: 28px 18px; text-align: center; font-size: 12.5px; color: var(--muted); }
+  .rb-item {
+    padding: 10px 12px; border-radius: 8px; cursor: pointer;
+    margin-bottom: 2px; border: 1px solid transparent;
+    display: grid; grid-template-columns: 1fr auto; gap: 4px;
+  }
+  .rb-item:hover { background: #f8fafc; }
+  .rb-item.selected { background: var(--primary-soft); border-color: var(--primary); }
+  .rb-item-name { font-weight: 600; font-size: 13.5px; }
+  .rb-item-meta { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .rb-item-total {
+    font-size: 13px; font-weight: 600; align-self: center;
+    font-variant-numeric: tabular-nums; color: var(--text);
+  }
+  .rb-detail {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px 24px; box-shadow: var(--shadow);
+    min-height: 500px;
+  }
+  .rb-detail-empty {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; min-height: 400px; color: var(--muted); font-size: 13px;
+  }
+  .rb-section { margin-top: 18px; }
+  .rb-section h3 {
+    font-size: 14px; font-weight: 600; margin: 0 0 8px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  table.rb-table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  table.rb-table th, table.rb-table td {
+    padding: 7px 8px; border-bottom: 1px solid var(--border);
+    text-align: left; vertical-align: top;
+  }
+  table.rb-table th { font-weight: 600; background: #f8fafc; font-size: 12px; }
+  table.rb-table td.num, table.rb-table th.num {
+    text-align: right; font-variant-numeric: tabular-nums;
+  }
+  .rb-grand {
+    margin-top: 14px; padding: 12px 14px;
+    background: var(--primary-soft); border: 1px solid var(--primary);
+    border-radius: 10px; display: flex; justify-content: space-between;
+    align-items: center; font-size: 15px; font-weight: 700;
+  }
+  .rb-grand .num { font-variant-numeric: tabular-nums; color: var(--primary); font-size: 19px; }
+
+  /* status badge */
+  .badge.status-draft { background: #e2e8f0; color: #475569; }
+  .badge.status-sent  { background: #dbeafe; color: #1d4ed8; }
+  .badge.status-paid  { background: #dcfce7; color: #15803d; }
+  .badge.status-void  { background: #f1f5f9; color: #94a3b8; text-decoration: line-through; }
+
+  .rb-detail-head {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    justify-content: space-between; margin-bottom: 4px;
+  }
+  .rb-detail-head h2 { margin: 0; font-size: 17px; font-weight: 700; }
+  .rb-detail-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .rb-meta-row { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .rb-loading { padding: 30px; text-align: center; color: var(--muted); font-size: 13px; }
+  .rb-toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: #0f172a; color: #fff; padding: 10px 16px;
+    border-radius: 8px; font-size: 13px; z-index: 9999;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    opacity: 0; transition: opacity .15s;
+  }
+  .rb-toast.show { opacity: 1; }
+
+  /* ── 인쇄 ── */
+  @media print {
+    body { background: #fff; }
+    .no-print, .sidebar, .sidebar-backdrop, .mobile-menu-btn,
+    .rb-toolbar, .rb-stats, .rb-list-wrap, .rb-detail-actions,
+    .page-head-actions { display: none !important; }
+    .rb-layout { display: block !important; }
+    .rb-detail { border: none; box-shadow: none; padding: 0; }
+    .container { padding: 0 !important; }
+  }
+</style>
 </head>
 <body>
 <main class="container">
-  <div class="page-head">
+  <div class="page-head no-print">
     <div>
       <h1>💰 임대추가요금청구</h1>
-      <p class="muted" style="margin:2px 0 0 0;">기본료 외 추가 사용분 청구 관리.</p>
+      <p class="muted" style="margin:2px 0 0 0;">고정 임대료 + 사용량 초과 과금 통합 청구서.</p>
+    </div>
+    <div class="page-head-actions">
+      <button id="rb-bulk" class="btn primary">⚡ 이번달 청구 일괄 생성</button>
+      <button id="rb-reload" class="btn ghost">↻ 새로고침</button>
     </div>
   </div>
-  <div class="card" style="padding:24px; text-align:center; margin-top:14px;">
-    <p style="font-size:14px; margin:0;">이 페이지는 비어 있습니다.</p>
-    <p class="muted" style="margin-top:6px;">새 내용으로 채울 예정입니다.</p>
+
+  <div class="rb-toolbar no-print">
+    <label style="font-size:13px; font-weight:500;">청구월</label>
+    <input type="month" id="rb-ym">
+    <span id="rb-status" class="muted" style="font-size:12px;"></span>
+  </div>
+
+  <div class="rb-stats no-print" id="rb-stats">
+    <!-- stat cards 동적 생성 -->
+  </div>
+
+  <div class="rb-layout">
+    <div class="rb-list-wrap no-print">
+      <div class="rb-list-toolbar">
+        <input type="text" id="rb-search" placeholder="거래처명 / 사업자번호 검색">
+      </div>
+      <ul class="rb-list" id="rb-list">
+        <li class="rb-list-empty">로딩 중…</li>
+      </ul>
+    </div>
+
+    <div class="rb-detail" id="rb-detail">
+      <div class="rb-detail-empty">좌측에서 거래처를 선택하세요.</div>
+    </div>
   </div>
 </main>
+
+<div id="rb-toast" class="rb-toast"></div>
+<script src="index.js"></script>
 </body>
 </html>

@@ -5,19 +5,88 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>임대카운터 — 한별시스템</title>
 <link rel="stylesheet" href="../styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
 </head>
 <body>
 <main class="container">
   <div class="page-head">
     <div>
       <h1>🖨 임대카운터</h1>
-      <p class="muted" style="margin:2px 0 0 0;">월별 인쇄 카운터 집계 및 추적.</p>
+      <p class="muted" style="margin:2px 0 0 0;">월별 카운터 입력 · 소모품 교체 예측 · 이상치 감시.</p>
+    </div>
+    <div class="page-head-actions">
+      <button class="btn ghost small" id="btn-refresh" title="새로고침">🔄 새로고침</button>
     </div>
   </div>
-  <div class="card" style="padding:24px; text-align:center; margin-top:14px;">
-    <p style="font-size:14px; margin:0;">이 페이지는 비어 있습니다.</p>
-    <p class="muted" style="margin-top:6px;">새 내용으로 채울 예정입니다.</p>
+
+  <!-- 상단 통계 -->
+  <div class="stats" id="stats">
+    <div class="stat-card"><div class="stat-label">이번달 입력 자산</div><div class="stat-value" id="st-entered">–</div></div>
+    <div class="stat-card"><div class="stat-label">누적 BW (이번달)</div><div class="stat-value primary" id="st-bw">–</div></div>
+    <div class="stat-card"><div class="stat-label">누적 컬러 (이번달)</div><div class="stat-value primary" id="st-co">–</div></div>
+    <div class="stat-card"><div class="stat-label">미수집 자산</div><div class="stat-value warn" id="st-missing">–</div></div>
+    <div class="stat-card"><div class="stat-label">이상치 경고</div><div class="stat-value warn" id="st-alerts">–</div></div>
   </div>
+
+  <!-- 툴바 -->
+  <div class="counter-toolbar">
+    <div class="toolbar-left">
+      <label>대상 월
+        <input type="month" id="f-month" />
+      </label>
+      <label>거래처
+        <select id="f-customer"><option value="">전체</option></select>
+      </label>
+      <label>카테고리
+        <select id="f-category">
+          <option value="">전체</option>
+          <option value="printer">출력기기</option>
+          <option value="pc">PC</option>
+          <option value="nas">NAS</option>
+          <option value="wellness">웰리스</option>
+        </select>
+      </label>
+      <label style="font-size:12px;">
+        <input type="checkbox" id="f-only-missing"> 미수집만
+      </label>
+    </div>
+    <div class="muted-small" id="row-count">–</div>
+  </div>
+
+  <!-- 데이터 그리드 -->
+  <div class="card counters-card">
+    <div class="counters-table-wrap">
+      <table class="sticky-first-col" style="width:100%; border-collapse:collapse; font-size:13px;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="text-align:left;">모델 / 거래처</th>
+            <th>구분</th>
+            <th class="num" style="text-align:right;">이전월 BW</th>
+            <th class="num" style="text-align:right;">이번달 BW</th>
+            <th class="num" style="text-align:right;">BW 증가</th>
+            <th class="num" style="text-align:right;">이전월 컬러</th>
+            <th class="num" style="text-align:right;">이번달 컬러</th>
+            <th class="num" style="text-align:right;">컬러 증가</th>
+            <th class="num" style="text-align:right;">Uptime(h)</th>
+            <th style="text-align:left;">예측/경고</th>
+          </tr>
+        </thead>
+        <tbody id="grid-body">
+          <tr><td colspan="10" class="muted-small" style="text-align:center; padding:30px;">데이터 로딩 중…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="muted-small" style="margin-top:10px;">
+      💡 셀을 클릭하여 직접 입력하면 자동 저장됩니다.
+      <span style="color:#dc2626; margin-left:14px;">🔴</span> = 이상치(이전 6개월 평균의 3배 초과)
+      <span style="margin-left:14px;">⚠</span> = 30일 내 소모품 교체 예정
+    </div>
+  </div>
+
+  <div id="toast" style="position:fixed; bottom:20px; right:20px; padding:10px 16px; border-radius:8px; background:#0f172a; color:#fff; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:9999;"></div>
 </main>
+<script src="index.js"></script>
 </body>
 </html>
