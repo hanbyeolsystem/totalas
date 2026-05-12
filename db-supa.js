@@ -372,6 +372,20 @@
         const { cms, ...withoutCms } = row;
         ({ error } = await supa.from('rental_contracts').upsert(withoutCms));
       }
+      // terms_checked / extras_checked 가 아직 boolean[] 인 DB 호환
+      // [{text, checked}] 객체 배열 → boolean[] 로 정규화하여 재시도
+      if (error && /type boolean/.test(String(error.message || ''))) {
+        console.warn('[contracts] terms_checked/extras_checked 가 아직 boolean[] — 08_alter_contracts_terms_jsonb.sql 적용 필요');
+        const toBools = arr => Array.isArray(arr)
+          ? arr.map(x => (x && typeof x === 'object') ? (x.checked !== false) : (x !== false))
+          : [];
+        const legacyRow = {
+          ...row,
+          terms_checked: toBools(row.terms_checked),
+          extras_checked: toBools(row.extras_checked),
+        };
+        ({ error } = await supa.from('rental_contracts').upsert(legacyRow));
+      }
       if (error) throw error;
       this.data.contracts[c.id] = { ...(this.data.contracts[c.id] || {}), ...row };
       return this.data.contracts[c.id];
