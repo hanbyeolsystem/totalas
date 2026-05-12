@@ -28,12 +28,18 @@
       <span class="nav-icon">🔧</span>
       <span>에러코드</span>
     </a>
-    <div class="sidebar-section-label">임대 관리</div>
     <nav class="sidebar-nav">
-      <a href="rental-status/index.html"><span class="nav-icon">🏠</span><span>임대현황</span></a>
-      <a href="rental-customers/index.html"><span class="nav-icon">👥</span><span>임대거래처</span></a>
-      <a href="rental-counters/index.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
-      <a href="rental-billing/index.html"><span class="nav-icon">💰</span><span>임대추가요금청구</span></a>
+      <div class="sidebar-group collapsed" id="rental-group">
+        <button type="button" class="sidebar-group-label" id="rental-group-toggle" aria-expanded="false">
+          <span class="group-caret">▶</span><span>임대 관리</span>
+        </button>
+        <div class="sidebar-subnav">
+          <a href="rental-status/index.html"><span class="nav-icon">🏠</span><span>임대현황</span></a>
+          <a href="rental-customers/index.html"><span class="nav-icon">👥</span><span>임대거래처</span></a>
+          <a href="rental-counters/index.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
+          <a href="rental-billing/index.html"><span class="nav-icon">💰</span><span>임대추가요금청구</span></a>
+        </div>
+      </div>
       <a href="prices/index.html"><span class="nav-icon">💵</span><span>가격표</span></a>
       <a href="meetings/index.html"><span class="nav-icon">🎙</span><span>음성미팅관리</span></a>
       <a href="archive/index.html"><span class="nav-icon">📁</span><span>고객자료실</span></a>
@@ -127,7 +133,30 @@ function restoreFromHash() {
   if (a) a.click();
 }
 
+/** "임대 관리" 라벨 토글 — 클릭 시 4개 하위 메뉴 접기/펼치기 */
+function bindGroupToggle() {
+  const group = document.getElementById('rental-group');
+  const btn   = document.getElementById('rental-group-toggle');
+  if (!group || !btn) return;
+
+  const apply = expanded => {
+    group.classList.toggle('collapsed', !expanded);
+    btn.setAttribute('aria-expanded', String(expanded));
+    try { localStorage.setItem('totalas.rental-group', expanded ? '1' : '0'); } catch {}
+  };
+
+  // 초기 상태: 활성 항목이 그룹 안에 있으면 펼침 / 없으면 저장값 / 기본 접힘
+  const hashActive = group.querySelector(`a[href="${decodeURIComponent(location.hash.replace(/^#/, ''))}"]`);
+  let saved = null;
+  try { saved = localStorage.getItem('totalas.rental-group'); } catch {}
+  const initial = hashActive ? true : (saved === '1');
+  apply(initial);
+
+  btn.addEventListener('click', () => apply(group.classList.contains('collapsed')));
+}
+
 bindSidebarLinks();
+bindGroupToggle();
 restoreFromHash();
 </script>
 
