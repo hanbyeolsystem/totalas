@@ -362,9 +362,16 @@
         extras_checked: c.extras_checked || [],
         special: c.special || [],
         bank: c.bank || {},
+        cms: c.cms || {},
         source_file: c.source_file || '',
       };
-      const { error } = await supa.from('rental_contracts').upsert(row);
+      // cms 컬럼이 없는 구버전 DB 호환 — 실패 시 cms 제외 재시도
+      let { error } = await supa.from('rental_contracts').upsert(row);
+      if (error && /cms/.test(String(error.message || ''))) {
+        console.warn('[contracts] cms 컬럼 누락 — 07_alter_contracts_cms.sql 적용 필요');
+        const { cms, ...withoutCms } = row;
+        ({ error } = await supa.from('rental_contracts').upsert(withoutCms));
+      }
       if (error) throw error;
       this.data.contracts[c.id] = { ...(this.data.contracts[c.id] || {}), ...row };
       return this.data.contracts[c.id];

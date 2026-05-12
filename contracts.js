@@ -6,20 +6,16 @@
 
 const DEFAULT_TERMS = [
   '약정기간내 중도해지시 남은 기간의 50%가 위약금으로 발생 된다.',
-  '중도해지시 설치비 및 철거비 5만원, 등록비 10만원 청구된다. (단, 레이저는 설치비/철거비 10만원, 등록비 20만원 청구)',
+  '중도해지시 설치비 및 철거비 5만원, 등록비 10만원 청구된다. (단, 레이져는 설치비 및 철거비 10만원, 등록비 20만원 청구)',
   '기계 이전시 기본 3만원 청구된다. (단, 거리에 따라 차등적용된다.)',
-  '만료일 15일 이전에 계약 해지여부를 통보하지 않을 경우 본 계약과 동일한 조건으로 1년 단위로 자동연장된다.',
-  '임대 PC의 운영체제는 정품을 제공하며, 사용자가 임의로 OS를 변경하거나 비정품 소프트웨어 설치로 발생하는 문제는 사용자 책임이다.',
-  '임대 PC·주변기기의 사용자 과실로 인한 파손·분실 시 수리비 또는 재구매 비용은 별도로 청구된다.',
+  '만료일 15일 이전에 계약 해지여부를 통보하지 않을 경우 본 계약과 동일한 조건으로 1년 단위로 자동연장',
   '첨부된 이용약관자료를 모두 이해 하였습니다.',
 ];
 const DEFAULT_EXTRAS = [
   '월 제공매수 초과 시에는 초과사용 임대료가 추가 청구된다는 내용에 대해 설명받았습니다.',
   '프린터 사용법 및 주의사항을 안내받았습니다.',
-  '프린터 연결 사용 시 인터넷환경, 공유기 상태에 따라 출력이 원활치않을 수 있기 때문에 당사 서비스팀의 진단 후 A/S 진행여부가 결정됨을 안내받았습니다.',
-  'pc포맷, 바이러스로 인한 케이블 임의 제거로 pc문제로 인한 출장시, 회당 출장비 3만원 이상의 출장비가 부과된다.',
-  'PC 임대 시 OS 정품·백신·기본 사무용 프로그램 설치 지원을 안내받았습니다.',
-  'PC 임대 기간 중 하드웨어 고장은 무상 A/S 대상이며, 사용자 과실 파손 시 별도 청구됨을 안내받았습니다.',
+  '프린터 연결 사용 시 인터넷환경, 공유기 상태에 따라 출력이 원활치 않을 수 있기 때문에 당사 서비스팀의 진단 후 A/S 진행여부가 결정된다는 내용을 설명받았습니다.',
+  'PC포맷, 바이러스로 인한 케이블 임의 제거로 PC문제로 인한 출장시, 회당 출장비 3만원 이상의 출장비가 부과된다.',
 ];
 
 let ctState = { selectedId: null, search: '', sort: 'name' };
@@ -180,24 +176,43 @@ function blankContract() {
     company_top: '',
     requester: '',
     address: '',
-    invoice_kind: '□  전자세금계산서',
+    invoice_kind: '□ 전자세금계산서',
     biz_no: '',
     mobile: '',
     tel_fax: '',
     email: '',
     items: [
-      { no: 1, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 1, install: '무료', fee: 0, vat_note: 'VAT별도' },
+      { no: 1, product: '', bw_free: 500, co_free: 200, bw_rate: 10, co_rate: 100, qty: 1, install: '무료', fee: 0, note: 'VAT별도' },
     ],
     deposit: 0,
+    install_fee: '무료',
     total_fee: 0,
     contract_date: new Date().toISOString().slice(0,10),
     contract_months: 36,
+    contract_years: 3,
     pay_day: 25,
-    // 새 형식: [{text, checked}, ...] — 기존 boolean[] 도 자동 정규화됨
     terms_checked:  DEFAULT_TERMS.map(t => ({ text: t, checked: true })),
     extras_checked: DEFAULT_EXTRAS.map(t => ({ text: t, checked: true })),
-    special: [''],
-    bank: { name: '농협', acct: '010-4585-6890-09', holder: '김상환(한별시스템)' },
+    special: ['', ''],
+    bank: { name: '농협', acct: '010-4585-6890-99', holder: '김상환(한별시스템)' },
+    cms: {
+      kind: '신규',       // '신규' / '변경' / '해지'
+      customer_no: '',
+      autopay_start: '',
+      autopay_day: 25,
+      applicant_name: '',
+      applicant_email: '',
+      applicant_address: '',
+      applicant_contact: '',
+      applicant_mobile: '',
+      payment_method: 'cms',  // 'cms' / 'card'
+      bank_name: '',
+      biz_no: '',
+      holder: '',
+      account_no: '',
+      resident6: '',
+      card_expiry: '',
+    },
   };
 }
 
@@ -272,22 +287,24 @@ function renderDoc(c) {
 
       <table class="ct-tbl ct-tbl-items">
         <colgroup>
-          <col style="width:5%"><col style="width:5%"><col style="width:20%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:11%"><col style="width:5%"><col style="width:3%">
+          <col style="width:5%"><col style="width:5%"><col style="width:22%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:11%"><col style="width:6%"><col style="width:3%">
         </colgroup>
         <thead>
           <tr>
             <th rowspan="2" class="ct-vlabel-blank"></th>
             <th rowspan="2">#</th>
             <th rowspan="2">렌탈물품</th>
-            <th colspan="2">기본매수(무료)</th>
-            <th colspan="2">추가장당(원)</th>
+            <th rowspan="2">기본(흑)</th>
+            <th rowspan="2">기본(컬)</th>
+            <th rowspan="2">추가(흑)</th>
+            <th rowspan="2">추가(컬)</th>
             <th rowspan="2">수량</th>
             <th rowspan="2">설치비</th>
             <th rowspan="2">월 렌탈료</th>
-            <th rowspan="2">VAT</th>
+            <th rowspan="2">비고</th>
             <th rowspan="2" class="no-print"></th>
           </tr>
-          <tr><th>흑백</th><th>컬러</th><th>흑백</th><th>컬러</th></tr>
+          <tr></tr>
         </thead>
         <tbody id="ct-items-tbody">
           ${items.map((it, i) => itemRowHtml(it, i, items.length)).join('')}
@@ -298,16 +315,20 @@ function renderDoc(c) {
               <button type="button" class="btn small ghost" data-action="add-item">+ 행 추가</button>
             </td>
           </tr>
-          <tr>
-            <td colspan="3" class="ct-deposit-cell">보증금</td>
-            <td><input class="ct-input ed num" data-bind="deposit" type="number" value="${c.deposit || 0}"></td>
-            <td colspan="5" class="ct-deposit-note">(기본 2개월치) / 최초설치비 : 무료</td>
-            <td class="ct-total-label">합계금액</td>
-            <td><input class="ct-input ed num" data-bind="total_fee" id="ct-total-input" type="number" value="${c.total_fee || 0}"></td>
-            <td colspan="2">VAT별도</td>
-          </tr>
         </tfoot>
       </table>
+
+      <!-- 보증금 / 합계 / 계약기간 정보 라인 -->
+      <div class="ct-summary-line" style="display:flex; flex-wrap:wrap; gap:18px 28px; padding:6px 8px; margin:6px 0 12px; border:1px solid #555; font-size:11.5px;">
+        <div>* 보증금 : <input class="ct-input ed num" data-bind="deposit" type="number" value="${c.deposit || 0}" style="width:90px;"> 원
+          <span class="muted-small">(기본 2개월치) / 최초설치비 : <input class="ct-input ed" data-bind="install_fee" value="${escapeAttr(c.install_fee || '무료')}" style="width:60px;"></span>
+        </div>
+        <div>합계금액 : <input class="ct-input ed num" data-bind="total_fee" id="ct-total-input" type="number" value="${c.total_fee || 0}" style="width:110px;"> 원 <span class="muted-small">(VAT포함)</span>
+        </div>
+        <div>기본 계약기간 : <input class="ct-input ed num" data-bind="contract_years" type="number" value="${c.contract_years || 3}" style="width:50px;"> 년
+          <span class="muted-small">(<input class="ct-input ed num" data-bind="contract_months" type="number" value="${c.contract_months || 36}" style="width:60px;"> 개월)</span>
+        </div>
+      </div>
 
       <table class="ct-tbl ct-tbl-terms">
         <colgroup><col style="width:8%"><col><col style="width:10%"><col style="width:4%" class="no-print"></colgroup>
@@ -521,19 +542,21 @@ function renderDoc(c) {
 }
 
 function itemRowHtml(it, i, total) {
+  // 비고 필드는 신규 'note' 또는 legacy 'vat_note' 둘 다 받음
+  const note = it.note != null ? it.note : (it.vat_note || 'VAT별도');
   return `
     <tr data-item="${i}">
       ${i === 0 ? `<th rowspan="${total}" class="ct-vlabel">계<br>약<br>내<br>용</th>` : ''}
       <td class="ct-num">${i + 1}</td>
-      <td><input class="ct-input ed" data-item-field="product" value="${escapeAttr(it.product)}" placeholder="모델명 (프린터·PC·모니터 등)"></td>
-      <td><input class="ct-input ed num" data-item-field="bw_free" type="number" value="${it.bw_free || 0}"></td>
-      <td><input class="ct-input ed num" data-item-field="co_free" type="number" value="${it.co_free || 0}"></td>
-      <td><input class="ct-input ed num" data-item-field="bw_rate" type="number" value="${it.bw_rate || 0}"></td>
-      <td><input class="ct-input ed num" data-item-field="co_rate" type="number" value="${it.co_rate || 0}"></td>
-      <td><input class="ct-input ed num qty" data-item-field="qty" type="number" value="${it.qty || 0}"></td>
-      <td><input class="ct-input ed" data-item-field="install" value="${escapeAttr(it.install)}" placeholder="무료"></td>
-      <td><input class="ct-input ed num" data-item-field="fee" type="number" value="${it.fee || 0}"></td>
-      <td><input class="ct-input ed" data-item-field="vat_note" value="${escapeAttr(it.vat_note)}"></td>
+      <td><input class="ct-input ed" data-item-field="product" value="${escapeAttr(it.product)}" placeholder="모델명 (프린터·PC·모니터)"></td>
+      <td><input class="ct-input ed num" data-item-field="bw_free" type="number" value="${it.bw_free || 0}" title="흑백 무료 매수"> <span class="muted-small">장</span></td>
+      <td><input class="ct-input ed num" data-item-field="co_free" type="number" value="${it.co_free || 0}" title="컬러 무료 매수"> <span class="muted-small">장</span></td>
+      <td><input class="ct-input ed num" data-item-field="bw_rate" type="number" value="${it.bw_rate || 0}" title="흑백 추가 단가"> <span class="muted-small">원</span></td>
+      <td><input class="ct-input ed num" data-item-field="co_rate" type="number" value="${it.co_rate || 0}" title="컬러 추가 단가"> <span class="muted-small">원</span></td>
+      <td><input class="ct-input ed num qty" data-item-field="qty" type="number" value="${it.qty || 0}"> <span class="muted-small">대</span></td>
+      <td><input class="ct-input ed" data-item-field="install" value="${escapeAttr(it.install || '무료')}" placeholder="무료"></td>
+      <td><input class="ct-input ed num" data-item-field="fee" type="number" value="${it.fee || 0}"> <span class="muted-small">원</span></td>
+      <td><input class="ct-input ed" data-item-field="note" value="${escapeAttr(note)}" placeholder="VAT별도"></td>
       <td class="no-print" style="text-align:center;">
         <button type="button" class="btn small ghost danger" data-action="del-item" data-idx="${i}" title="삭제">×</button>
       </td>
