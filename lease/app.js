@@ -488,29 +488,46 @@ function renderTabContracts(body, id) {
 
 /** 계약서 작성/보기를 iframe 모달로 띄움. */
 function openContractModal(customerId, contractId) {
+  console.log('[contract] openContractModal', { customerId, contractId });
   const url = contractId
     ? `contracts.html?id=${encodeURIComponent(contractId)}&embed=1`
     : `contracts.html?customer=${encodeURIComponent(customerId)}&embed=1`;
-  const html = `
-    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border);">
+
+  const backdrop = document.getElementById('modal-backdrop');
+  const box      = document.getElementById('modal-box');
+  if (!backdrop || !box) {
+    alert('모달 시스템 누락 (modal-backdrop / modal-box). 페이지를 새로고침해주세요.');
+    return;
+  }
+
+  box.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); flex-shrink:0;">
       <h3 style="margin:0; font-size:15px;">📋 계약서 ${contractId ? '편집' : '신규 작성'}</h3>
-      <button class="btn ghost small" data-close>× 닫기</button>
+      <button class="btn ghost small" data-close type="button">× 닫기</button>
     </div>
-    <iframe src="${url}" style="width:100%; height:75vh; border:none; display:block;" id="contract-iframe"></iframe>
-    <div class="muted-small" style="padding:6px 12px; border-top:1px solid var(--border); background:#f8fafc;">
+    <iframe src="${url}" style="flex:1; width:100%; min-height:60vh; border:none; display:block;" id="contract-iframe"></iframe>
+    <div class="muted-small" style="padding:6px 12px; border-top:1px solid var(--border); background:#f8fafc; flex-shrink:0;">
       💡 계약서 작성 후 우상단 [💾 저장] 클릭, 작업이 끝나면 [× 닫기] 로 돌아가세요.
     </div>
   `;
-  const box = $('#modal-box');
-  box.innerHTML = html;
-  box.style.padding = '0';
-  box.style.maxWidth = '95vw';
-  box.style.width    = '1200px';
   box.classList.add('wide');
-  $('#modal-backdrop').classList.remove('hidden');
+  // 인라인 스타일 — 작은 viewport 에서도 안전, flex 컬럼으로 iframe 이 남는 공간 차지
+  Object.assign(box.style, {
+    padding: '0',
+    width: 'min(95vw, 1200px)',
+    maxWidth: '95vw',
+    height: 'min(90vh, 800px)',
+    maxHeight: '90vh',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  });
+  backdrop.classList.remove('hidden');
+
   box.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', async () => {
     closeModal();
-    box.style.padding = ''; box.style.maxWidth = ''; box.style.width = '';
+    box.removeAttribute('style');
+    box.classList.remove('wide');
     // 닫을 때 계약서 다시 로드해서 목록 갱신
     try { await store.load(); } catch (_) {}
     renderCustomerContracts(customerId);
