@@ -20,24 +20,43 @@ const DEFAULT_EXTRAS = [
 
 let ctState = { selectedId: null, search: '', sort: 'name' };
 
+/** 진단·견고화:
+ *  - bindContractPage 는 totalas:ready 와 무관하게 DOMContentLoaded 에서 무조건 부착
+ *  - store.load 실패해도 버튼 listener 는 유지 (데이터 로드만 실패, 클릭 자체는 작동)
+ */
+function _ensureBound() {
+  if (window._contractsBound) return;
+  if (!document.querySelector('.contracts-page')) return;
+  console.log('[contracts] _ensureBound — listener 부착');
+  window._contractsBound = true;
+  try { bindContractPage(); }
+  catch (e) { console.error('[contracts] bindContractPage 실패:', e); }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _ensureBound);
+} else {
+  _ensureBound();
+}
+
 document.addEventListener('totalas:ready', async () => {
   if (!document.querySelector('.contracts-page')) return;
+  _ensureBound();  // 안전망 — DOMContentLoaded 보다 늦으면 여기서
+
   try {
     if (typeof showLoading === 'function') showLoading('계약서 로드 중…');
     await store.load();
+    console.log('[contracts] store.load OK',
+      Object.keys(store.data.customers || {}).length, 'customers',
+      Object.keys(store.data.contracts || {}).length, 'contracts');
   } catch (err) {
-    console.error('store.load() 실패:', err);
-    alert('데이터 로드 실패: ' + (err.message || err));
-    return;
+    console.error('[contracts] store.load 실패:', err);
+    setStatus('⚠ 데이터 로드 실패: ' + (err.message || err) + ' — 새 계약서 작성·인쇄는 가능합니다');
   } finally {
     if (typeof hideLoading === 'function') hideLoading();
   }
-  bindContractPage();
   renderContractList();
 
-  // URL 파라미터: ?id=<contract_id>  → 해당 계약서 로드
-  //               ?customer=<cust_id> → 신규 작성 + 거래처 미리 채움
-  //               (없으면 빈 화면)
+  // URL 파라미터
   const params = new URLSearchParams(location.search);
   const ctId   = params.get('id');
   const custId = params.get('customer');
@@ -62,22 +81,28 @@ document.addEventListener('totalas:ready', async () => {
 });
 
 function bindContractPage() {
-  $('#btn-new').addEventListener('click', () => {
+  // 안전 가드: element 없으면 silent skip (embed 모드 등에서 숨겨진 요소 대응)
+  const on = (id, ev, h) => {
+    const el = document.getElementById(id);
+    if (!el) { console.warn('[contracts] element 없음:', id); return; }
+    el.addEventListener(ev, h);
+  };
+  on('btn-new', 'click', () => {
     ctState.selectedId = null;
     renderDoc(blankContract());
     setStatus('새 계약서 — 저장하면 거래처에 연결됩니다');
     renderContractList();
   });
-  $('#btn-save').addEventListener('click', saveCurrentContract);
-  $('#btn-print').addEventListener('click', () => window.print());
-  $('#btn-delete').addEventListener('click', deleteCurrentContract);
-  $('#btn-fill-from-customer').addEventListener('click', openCustomerPicker);
-  $('#btn-import-seed').addEventListener('click', importContractSeed);
-  $('#ct-search').addEventListener('input', e => {
+  on('btn-save', 'click', saveCurrentContract);
+  on('btn-print', 'click', () => window.print());
+  on('btn-delete', 'click', deleteCurrentContract);
+  on('btn-fill-from-customer', 'click', openCustomerPicker);
+  on('btn-import-seed', 'click', importContractSeed);
+  on('ct-search', 'input', e => {
     ctState.search = e.target.value.toLowerCase().trim();
     renderContractList();
   });
-  $('#ct-sort').addEventListener('change', e => {
+  on('ct-sort', 'change', e => {
     ctState.sort = e.target.value;
     renderContractList();
   });
