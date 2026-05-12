@@ -34,7 +34,31 @@ document.addEventListener('totalas:ready', async () => {
   }
   bindContractPage();
   renderContractList();
-  renderEmptyDoc();
+
+  // URL 파라미터: ?id=<contract_id>  → 해당 계약서 로드
+  //               ?customer=<cust_id> → 신규 작성 + 거래처 미리 채움
+  //               (없으면 빈 화면)
+  const params = new URLSearchParams(location.search);
+  const ctId   = params.get('id');
+  const custId = params.get('customer');
+  if (ctId && store.data.contracts[ctId]) {
+    loadContract(ctId);
+  } else if (custId && store.data.customers[custId]) {
+    const c = store.data.customers[custId];
+    ctState.selectedId = null;
+    const draft = blankContract();
+    draft.customer_id  = c.id;
+    draft.company      = c.company || '';
+    draft.requester    = c.ceo || '';
+    draft.biz_no       = c.biz_no || '';
+    draft.address      = c.address || '';
+    draft.tel_fax      = c.phone || '';
+    draft.email        = c.email || '';
+    renderDoc(draft);
+    setStatus(`신규 계약서 — ${c.company} 거래처에 연결됩니다`);
+  } else {
+    renderEmptyDoc();
+  }
 });
 
 function bindContractPage() {

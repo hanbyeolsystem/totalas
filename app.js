@@ -397,6 +397,16 @@ function renderCustomerDetail(id) {
       </section>
 
       <section class="info-card span-2">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <h4 style="margin:0;">📋 임대 계약서</h4>
+          <div style="display:flex; gap:6px;">
+            <a class="btn small ghost" href="contracts.html?customer=${escapeHtml(id)}">+ 신규 계약서</a>
+          </div>
+        </div>
+        <div id="cust-contracts-${escapeHtml(id)}" style="margin-top:8px;"></div>
+      </section>
+
+      <section class="info-card span-2">
         <h4>첨부 서류 (이미지)</h4>
         <div class="att-grid" id="att-grid-${escapeHtml(id)}">
           ${ATTACHMENT_TYPES.map(t => `
@@ -422,8 +432,43 @@ function renderCustomerDetail(id) {
   wrap.querySelector('[data-edit]')?.addEventListener('click', () => openCustomerModal(id));
   wrap.querySelector('[data-del]')?.addEventListener('click', () => deleteCustomer(id));
 
+  // 계약서 섹션 렌더
+  renderCustomerContracts(id);
+
   // 첨부 비동기 로드
   loadAndRenderAttachments(id);
+}
+
+/** 거래처별 계약서 목록 렌더 (renderCustomerDetail 내부에서 호출). */
+function renderCustomerContracts(customerId) {
+  const wrap = document.getElementById(`cust-contracts-${customerId}`);
+  if (!wrap) return;
+  const list = Object.values(store.data.contracts || {})
+    .filter(c => c.customer_id === customerId)
+    .sort((a, b) => (b.contract_date || '').localeCompare(a.contract_date || ''));
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="muted" style="padding:14px; text-align:center; border:1px dashed var(--border); border-radius:6px;">등록된 계약서가 없습니다. [+ 신규 계약서] 를 눌러 작성하세요.</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <ul style="list-style:none; margin:0; padding:0;">
+      ${list.map(ct => {
+        const items = Array.isArray(ct.items) ? ct.items.length : 0;
+        return `
+          <li style="border:1px solid var(--border); border-radius:6px; padding:8px 12px; margin-bottom:6px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:200px;">
+              <div style="font-weight:600;">${escapeHtml(ct.contract_date || '날짜 미입력')} · ${escapeHtml(ct.requester || ct.company || '')}</div>
+              <div class="muted-small">
+                항목 ${items}건 · 월 ${(ct.total_fee || 0).toLocaleString()}원 · 보증금 ${(ct.deposit || 0).toLocaleString()}원
+                ${ct.contract_months ? ' · ' + ct.contract_months + '개월' : ''}
+              </div>
+            </div>
+            <a class="btn small ghost" href="contracts.html?id=${escapeHtml(ct.id)}">열기</a>
+          </li>`;
+      }).join('')}
+    </ul>
+  `;
 }
 
 async function loadAndRenderAttachments(customerId) {
