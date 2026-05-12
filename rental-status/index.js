@@ -862,7 +862,7 @@
       if (a && a.monthly_fee) monthlyTotal += Number(a.monthly_fee) || 0;
     });
     const maxAge = items.reduce((m, it) => {
-      const ag = computeAgeMonths(it);
+      const ag = ageMonths(it);
       return ag != null && ag > m ? ag : m;
     }, 0);
 
@@ -871,7 +871,7 @@
       ? `<tr><td colspan="8" class="empty-row">배정된 자산이 없습니다.</td></tr>`
       : items.map((it, i) => {
           const a = assignMap.get(it.id) || {};
-          const ag = computeAgeMonths(it);
+          const ag = ageMonths(it);
           return `<tr>
             <td>${i+1}</td>
             <td><span class="mini-pill ${escapeHtml(it.category||'기타')}">${escapeHtml(it.category||'기타')}</span></td>
