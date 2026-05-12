@@ -9,6 +9,8 @@ const DEFAULT_TERMS = [
   '중도해지시 설치비 및 철거비 5만원, 등록비 10만원 청구된다. (단, 레이저는 설치비/철거비 10만원, 등록비 20만원 청구)',
   '기계 이전시 기본 3만원 청구된다. (단, 거리에 따라 차등적용된다.)',
   '만료일 15일 이전에 계약 해지여부를 통보하지 않을 경우 본 계약과 동일한 조건으로 1년 단위로 자동연장된다.',
+  '임대 PC의 운영체제는 정품을 제공하며, 사용자가 임의로 OS를 변경하거나 비정품 소프트웨어 설치로 발생하는 문제는 사용자 책임이다.',
+  '임대 PC·주변기기의 사용자 과실로 인한 파손·분실 시 수리비 또는 재구매 비용은 별도로 청구된다.',
   '첨부된 이용약관자료를 모두 이해 하였습니다.',
 ];
 const DEFAULT_EXTRAS = [
@@ -16,6 +18,8 @@ const DEFAULT_EXTRAS = [
   '프린터 사용법 및 주의사항을 안내받았습니다.',
   '프린터 연결 사용 시 인터넷환경, 공유기 상태에 따라 출력이 원활치않을 수 있기 때문에 당사 서비스팀의 진단 후 A/S 진행여부가 결정됨을 안내받았습니다.',
   'pc포맷, 바이러스로 인한 케이블 임의 제거로 pc문제로 인한 출장시, 회당 출장비 3만원 이상의 출장비가 부과된다.',
+  'PC 임대 시 OS 정품·백신·기본 사무용 프로그램 설치 지원을 안내받았습니다.',
+  'PC 임대 기간 중 하드웨어 고장은 무상 A/S 대상이며, 사용자 과실 파손 시 별도 청구됨을 안내받았습니다.',
 ];
 
 let ctState = { selectedId: null, search: '', sort: 'name' };
@@ -183,20 +187,36 @@ function blankContract() {
     email: '',
     items: [
       { no: 1, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 1, install: '무료', fee: 0, vat_note: 'VAT별도' },
-      { no: 2, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 0, install: '', fee: 0, vat_note: '' },
-      { no: 3, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 0, install: '', fee: 0, vat_note: '' },
-      { no: 4, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 0, install: '', fee: 0, vat_note: '' },
     ],
     deposit: 0,
     total_fee: 0,
     contract_date: new Date().toISOString().slice(0,10),
     contract_months: 36,
     pay_day: 25,
-    terms_checked: [true, true, true, true, true],
-    extras_checked: [true, true, true, true],
-    special: ['', ''],
+    // 새 형식: [{text, checked}, ...] — 기존 boolean[] 도 자동 정규화됨
+    terms_checked:  DEFAULT_TERMS.map(t => ({ text: t, checked: true })),
+    extras_checked: DEFAULT_EXTRAS.map(t => ({ text: t, checked: true })),
+    special: [''],
     bank: { name: '농협', acct: '010-4585-6890-09', holder: '김상환(한별시스템)' },
   };
+}
+
+/** boolean[] (legacy) 또는 [{text, checked}, ...] (신규) → 항상 {text, checked}[] 반환 */
+function normalizeTermsLike(raw, defaults) {
+  if (!Array.isArray(raw) || !raw.length) {
+    return defaults.map(t => ({ text: t, checked: true }));
+  }
+  // 신규 형식
+  if (typeof raw[0] === 'object' && raw[0] !== null && 'text' in raw[0]) {
+    return raw.map(r => ({ text: String(r.text || ''), checked: r.checked !== false }));
+  }
+  // legacy boolean[] — defaults 와 결합. 더 긴 쪽 기준
+  const len = Math.max(raw.length, defaults.length);
+  const out = [];
+  for (let i = 0; i < len; i++) {
+    out.push({ text: defaults[i] || '', checked: raw[i] !== false });
+  }
+  return out;
 }
 
 // ============================================================
@@ -214,7 +234,12 @@ function renderEmptyDoc() {
 }
 
 function renderDoc(c) {
-  const items = padItems(c.items || []);
+  // 데이터 정규화 — boolean[] 도 객체 배열로 변환
+  c.terms_checked  = normalizeTermsLike(c.terms_checked,  DEFAULT_TERMS);
+  c.extras_checked = normalizeTermsLike(c.extras_checked, DEFAULT_EXTRAS);
+  c.special        = Array.isArray(c.special) && c.special.length ? c.special : [''];
+  c.items          = Array.isArray(c.items) && c.items.length ? c.items.map((it, i) => ({ no: i+1, ...it })) : blankContract().items;
+  const items = c.items;
   const html = `
     <!-- ============ 페이지 1: 표지 ============ -->
     <section class="contract-page ct-cover">
@@ -247,11 +272,11 @@ function renderDoc(c) {
 
       <table class="ct-tbl ct-tbl-items">
         <colgroup>
-          <col style="width:5%"><col style="width:5%"><col style="width:22%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:11%"><col style="width:6%">
+          <col style="width:5%"><col style="width:5%"><col style="width:20%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:11%"><col style="width:5%"><col style="width:3%">
         </colgroup>
         <thead>
           <tr>
-            <th rowspan="2" class="ct-vlabel">계<br>약<br>내<br>용</th>
+            <th rowspan="2" class="ct-vlabel-blank"></th>
             <th rowspan="2">#</th>
             <th rowspan="2">렌탈물품</th>
             <th colspan="2">기본매수(무료)</th>
@@ -260,44 +285,66 @@ function renderDoc(c) {
             <th rowspan="2">설치비</th>
             <th rowspan="2">월 렌탈료</th>
             <th rowspan="2">VAT</th>
+            <th rowspan="2" class="no-print"></th>
           </tr>
           <tr><th>흑백</th><th>컬러</th><th>흑백</th><th>컬러</th></tr>
         </thead>
         <tbody id="ct-items-tbody">
-          ${items.map((it, i) => itemRowHtml(it, i)).join('')}
+          ${items.map((it, i) => itemRowHtml(it, i, items.length)).join('')}
         </tbody>
         <tfoot>
+          <tr class="no-print">
+            <td colspan="12" style="text-align:left; padding:4px;">
+              <button type="button" class="btn small ghost" data-action="add-item">+ 행 추가</button>
+            </td>
+          </tr>
           <tr>
-            <td colspan="2" class="ct-deposit-cell">보증금</td>
+            <td colspan="3" class="ct-deposit-cell">보증금</td>
             <td><input class="ct-input ed num" data-bind="deposit" type="number" value="${c.deposit || 0}"></td>
             <td colspan="5" class="ct-deposit-note">(기본 2개월치) / 최초설치비 : 무료</td>
             <td class="ct-total-label">합계금액</td>
             <td><input class="ct-input ed num" data-bind="total_fee" id="ct-total-input" type="number" value="${c.total_fee || 0}"></td>
-            <td>VAT별도</td>
+            <td colspan="2">VAT별도</td>
           </tr>
         </tfoot>
       </table>
 
       <table class="ct-tbl ct-tbl-terms">
-        <colgroup><col style="width:8%"><col><col style="width:10%"></colgroup>
-        ${DEFAULT_TERMS.map((t, i) => `
+        <colgroup><col style="width:8%"><col><col style="width:10%"><col style="width:4%" class="no-print"></colgroup>
+        ${c.terms_checked.map((t, i) => `
           <tr>
-            ${i === 0 ? `<th rowspan="${DEFAULT_TERMS.length}" class="ct-vlabel">약<br>관</th>` : ''}
-            <td class="ct-term-text">* ${escapeHtml(t)}</td>
+            ${i === 0 ? `<th rowspan="${c.terms_checked.length}" class="ct-vlabel">약<br>관</th>` : ''}
+            <td class="ct-term-text">* <input class="ct-input ed term-text" data-bind="terms_checked.${i}.text" value="${escapeAttr(t.text)}" style="width:100%;"></td>
             <td class="ct-check-cell">
-              <label><input type="checkbox" data-bind="terms_checked.${i}" ${c.terms_checked?.[i] !== false ? 'checked' : ''}> 확인함 ■</label>
+              <label><input type="checkbox" data-bind="terms_checked.${i}.checked" ${t.checked !== false ? 'checked' : ''}> 확인함 ■</label>
+            </td>
+            <td class="no-print" style="text-align:center;">
+              <button type="button" class="btn small ghost danger" data-action="del-term" data-idx="${i}" title="삭제">×</button>
             </td>
           </tr>
         `).join('')}
-        ${DEFAULT_EXTRAS.map((t, i) => `
+        <tr class="no-print">
+          <td colspan="4" style="text-align:left; padding:4px;">
+            <button type="button" class="btn small ghost" data-action="add-term">+ 약관 추가</button>
+          </td>
+        </tr>
+        ${c.extras_checked.map((t, i) => `
           <tr>
-            ${i === 0 ? `<th rowspan="${DEFAULT_EXTRAS.length}" class="ct-vlabel">기<br>타</th>` : ''}
-            <td class="ct-term-text">▪ ${escapeHtml(t)}</td>
+            ${i === 0 ? `<th rowspan="${c.extras_checked.length}" class="ct-vlabel">기<br>타</th>` : ''}
+            <td class="ct-term-text">▪ <input class="ct-input ed term-text" data-bind="extras_checked.${i}.text" value="${escapeAttr(t.text)}" style="width:100%;"></td>
             <td class="ct-check-cell">
-              <label><input type="checkbox" data-bind="extras_checked.${i}" ${c.extras_checked?.[i] !== false ? 'checked' : ''}> 확인함 ■</label>
+              <label><input type="checkbox" data-bind="extras_checked.${i}.checked" ${t.checked !== false ? 'checked' : ''}> 확인함 ■</label>
+            </td>
+            <td class="no-print" style="text-align:center;">
+              <button type="button" class="btn small ghost danger" data-action="del-extra" data-idx="${i}" title="삭제">×</button>
             </td>
           </tr>
         `).join('')}
+        <tr class="no-print">
+          <td colspan="4" style="text-align:left; padding:4px;">
+            <button type="button" class="btn small ghost" data-action="add-extra">+ 부가설명 추가</button>
+          </td>
+        </tr>
       </table>
 
       <table class="ct-tbl ct-tbl-docs">
@@ -439,10 +486,17 @@ function renderDoc(c) {
       </ol>
 
       <h2 class="ct-page-title" style="margin-top:14mm;">제11조【특약사항】</h2>
-      <ol class="ct-special">
-        <li><input class="ct-input ed wide" data-bind="special.0" value="${escapeAttr((c.special || [])[0] || '')}" placeholder="특약사항 1"></li>
-        <li><input class="ct-input ed wide" data-bind="special.1" value="${escapeAttr((c.special || [])[1] || '')}" placeholder="특약사항 2 (없으면 비워두세요)"></li>
+      <ol class="ct-special" id="ct-special-list">
+        ${(c.special || ['']).map((s, i) => `
+          <li>
+            <input class="ct-input ed wide" data-bind="special.${i}" value="${escapeAttr(s)}" placeholder="특약사항 ${i+1}">
+            <button type="button" class="btn small ghost danger no-print" data-action="del-special" data-idx="${i}" title="삭제" style="margin-left:6px;">×</button>
+          </li>
+        `).join('')}
       </ol>
+      <div class="no-print" style="margin:6px 0;">
+        <button type="button" class="btn small ghost" data-action="add-special">+ 특약 추가</button>
+      </div>
 
       <p class="ct-end-text">이를 증명하기 위해 "갑"과 "을"은 계약서 2통을 작성하여, 각각 서명날인 후 각1통씩을 보관한다.</p>
 
@@ -466,12 +520,12 @@ function renderDoc(c) {
   recalcTotal();
 }
 
-function itemRowHtml(it, i) {
+function itemRowHtml(it, i, total) {
   return `
     <tr data-item="${i}">
-      ${i === 0 ? `<th rowspan="4" class="ct-vlabel">계<br>약<br>내<br>용</th>` : ''}
+      ${i === 0 ? `<th rowspan="${total}" class="ct-vlabel">계<br>약<br>내<br>용</th>` : ''}
       <td class="ct-num">${i + 1}</td>
-      <td><input class="ct-input ed" data-item-field="product" value="${escapeAttr(it.product)}" placeholder="모델명"></td>
+      <td><input class="ct-input ed" data-item-field="product" value="${escapeAttr(it.product)}" placeholder="모델명 (프린터·PC·모니터 등)"></td>
       <td><input class="ct-input ed num" data-item-field="bw_free" type="number" value="${it.bw_free || 0}"></td>
       <td><input class="ct-input ed num" data-item-field="co_free" type="number" value="${it.co_free || 0}"></td>
       <td><input class="ct-input ed num" data-item-field="bw_rate" type="number" value="${it.bw_rate || 0}"></td>
@@ -480,14 +534,11 @@ function itemRowHtml(it, i) {
       <td><input class="ct-input ed" data-item-field="install" value="${escapeAttr(it.install)}" placeholder="무료"></td>
       <td><input class="ct-input ed num" data-item-field="fee" type="number" value="${it.fee || 0}"></td>
       <td><input class="ct-input ed" data-item-field="vat_note" value="${escapeAttr(it.vat_note)}"></td>
+      <td class="no-print" style="text-align:center;">
+        <button type="button" class="btn small ghost danger" data-action="del-item" data-idx="${i}" title="삭제">×</button>
+      </td>
     </tr>
   `;
-}
-
-function padItems(items) {
-  const out = items.slice(0, 4).map((it, i) => ({ no: i+1, ...it }));
-  while (out.length < 4) out.push({ no: out.length+1, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 0, install: '', fee: 0, vat_note: '' });
-  return out;
 }
 
 function bindFormEvents() {
@@ -510,6 +561,44 @@ function bindFormEvents() {
   }
   const topInput = document.querySelector('[data-bind="company_top"]');
   if (topInput) topInput.addEventListener('input', () => topInput.dataset.userEdited = '1');
+
+  // 행 추가·삭제 (이벤트 위임)
+  $('#contract-doc').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const act = btn.dataset.action;
+    const idx = btn.dataset.idx != null ? parseInt(btn.dataset.idx, 10) : null;
+
+    // 현재 폼 데이터 수집 → 변경 → 재렌더
+    const c = collectFormData();
+
+    if (act === 'add-item') {
+      c.items = c.items || [];
+      c.items.push({ no: c.items.length + 1, product: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 1, install: '', fee: 0, vat_note: '' });
+    } else if (act === 'del-item') {
+      if ((c.items || []).length <= 1) { alert('최소 1행은 남겨주세요.'); return; }
+      c.items.splice(idx, 1);
+    } else if (act === 'add-term') {
+      c.terms_checked = c.terms_checked || [];
+      c.terms_checked.push({ text: '', checked: true });
+    } else if (act === 'del-term') {
+      c.terms_checked.splice(idx, 1);
+    } else if (act === 'add-extra') {
+      c.extras_checked = c.extras_checked || [];
+      c.extras_checked.push({ text: '', checked: true });
+    } else if (act === 'del-extra') {
+      c.extras_checked.splice(idx, 1);
+    } else if (act === 'add-special') {
+      c.special = c.special || [];
+      c.special.push('');
+    } else if (act === 'del-special') {
+      if ((c.special || []).length <= 1) { alert('최소 1행은 남겨주세요.'); return; }
+      c.special.splice(idx, 1);
+    } else {
+      return;  // 알 수 없는 action — 폼 재렌더 안 함
+    }
+    renderDoc(c);
+  });
 }
 
 function recalcTotal() {
@@ -529,10 +618,11 @@ function collectFormData() {
     ? JSON.parse(JSON.stringify(store.data.contracts[ctState.selectedId]))
     : blankContract();
 
-  c.terms_checked  = c.terms_checked  || [true, true, true, true, true];
-  c.extras_checked = c.extras_checked || [true, true, true, true];
-  c.special        = c.special        || ['', ''];
-  c.bank           = c.bank           || {};
+  // legacy boolean[] → 새 객체 배열로 정규화 (data-bind .text / .checked 가 정상 동작하도록)
+  c.terms_checked  = normalizeTermsLike(c.terms_checked,  DEFAULT_TERMS);
+  c.extras_checked = normalizeTermsLike(c.extras_checked, DEFAULT_EXTRAS);
+  c.special        = Array.isArray(c.special) && c.special.length ? c.special : [''];
+  c.bank           = c.bank || {};
 
   document.querySelectorAll('[data-bind]').forEach(el => {
     const key = el.dataset.bind;

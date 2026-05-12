@@ -2390,13 +2390,27 @@ select.cell-edit {
   border-collapse: collapse;
   margin-bottom: 8px;
   font-size: 11px;
+  table-layout: fixed; /* colgroup width 강제 — 행 자동 정렬 */
 }
 .ct-tbl th, .ct-tbl td {
   border: 1px solid #555;
   padding: 4px 6px;
   text-align: left;
   vertical-align: middle;
+  word-break: break-word;       /* 긴 텍스트 자동 줄바꿈 */
+  overflow-wrap: anywhere;
 }
+.ct-tbl .ct-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;                 /* flex 자식 축소 허용 */
+}
+.ct-tbl .term-text {
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+/* embed 모드의 page-head 좌측 타이틀만 숨김 — 액션 버튼은 유지 */
+.no-print .btn.small.ghost.danger { color: #dc2626; }
 .ct-tbl th {
   background: #f1f3f5;
   font-weight: 600;
