@@ -14,7 +14,9 @@
   const STORE = {
     data: {
       customers: {}, printers: {}, counters: {}, contracts: {},
-      meetings: {}, archive: {}, prices: {}, billings: {}, meta: {},
+      meetings: {}, archive: {}, prices: {}, billings: {},
+      productCosts: {}, serviceVisits: {}, supplies: {},
+      meta: {},
     },
     _loaded: false,
 
@@ -53,7 +55,8 @@
         }
       };
 
-      const [custs, prints, counters, contracts, meetings, prices, archive, billings] = await Promise.all([
+      const [custs, prints, counters, contracts, meetings, prices, archive, billings,
+             productCosts, serviceVisits, supplies] = await Promise.all([
         fetchCustomers(),
         fetchAll('rental_printers'),
         fetchAll('rental_counters'),
@@ -62,6 +65,9 @@
         fetchAll('rental_prices'),
         fetchAll('rental_archive'),
         fetchAll('rental_extra_billings').catch(() => []),
+        fetchAll('rental_product_costs').catch(() => []),
+        fetchAll('rental_service_visits').catch(() => []),
+        fetchAll('rental_supplies').catch(() => []),
       ]);
 
       // customers: id 키
@@ -113,6 +119,14 @@
       // billings: id 키
       this.data.billings = {};
       for (const b of (billings || [])) this.data.billings[b.id] = b;
+
+      // 원가/출장/소모품: id 키
+      this.data.productCosts = {};
+      for (const r of (productCosts || [])) this.data.productCosts[r.id] = r;
+      this.data.serviceVisits = {};
+      for (const r of (serviceVisits || [])) this.data.serviceVisits[r.id] = r;
+      this.data.supplies = {};
+      for (const r of (supplies || [])) this.data.supplies[r.id] = r;
 
       this._loaded = true;
       return this.data;
@@ -521,6 +535,89 @@
         .update({ paid_at: null }).eq('id', id);
       if (error) throw error;
       if (this.data.billings[id]) this.data.billings[id].paid_at = null;
+    },
+
+    // ============================================================
+    // 거래처 원가 / 수익률 — 3개 테이블
+    //   productCosts  (제품 매입 원가)
+    //   serviceVisits (출장 내역)
+    //   supplies      (소모품 사용)
+    // ============================================================
+    async upsertProductCost(r) {
+      const supa = window.totalasAuth;
+      if (!r.id) r.id = 'pc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const row = {
+        id: r.id,
+        customer_id: r.customer_id || null,
+        serial: r.serial || null,
+        product_name: r.product_name || '',
+        purchase_price: toInt(r.purchase_price),
+        purchase_date: r.purchase_date || null,
+        amortization_months: toInt(r.amortization_months) || 36,
+        notes: r.notes || '',
+      };
+      const { error } = await supa.from('rental_product_costs').upsert(row);
+      if (error) throw error;
+      this.data.productCosts[r.id] = { ...(this.data.productCosts[r.id] || {}), ...row };
+      return this.data.productCosts[r.id];
+    },
+    async deleteProductCost(id) {
+      const supa = window.totalasAuth;
+      const { error } = await supa.from('rental_product_costs').delete().eq('id', id);
+      if (error) throw error;
+      delete this.data.productCosts[id];
+    },
+
+    async upsertServiceVisit(r) {
+      const supa = window.totalasAuth;
+      if (!r.id) r.id = 'sv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const row = {
+        id: r.id,
+        customer_id: r.customer_id || null,
+        visit_date: r.visit_date,
+        purpose: r.purpose || '',
+        technician: r.technician || '',
+        travel_cost: toInt(r.travel_cost),
+        labor_cost: toInt(r.labor_cost),
+        notes: r.notes || '',
+      };
+      const { error } = await supa.from('rental_service_visits').upsert(row);
+      if (error) throw error;
+      this.data.serviceVisits[r.id] = { ...(this.data.serviceVisits[r.id] || {}), ...row };
+      return this.data.serviceVisits[r.id];
+    },
+    async deleteServiceVisit(id) {
+      const supa = window.totalasAuth;
+      const { error } = await supa.from('rental_service_visits').delete().eq('id', id);
+      if (error) throw error;
+      delete this.data.serviceVisits[id];
+    },
+
+    async upsertSupply(r) {
+      const supa = window.totalasAuth;
+      if (!r.id) r.id = 'sp_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const qty = toInt(r.qty) || 1;
+      const unit = toInt(r.unit_cost);
+      const row = {
+        id: r.id,
+        customer_id: r.customer_id || null,
+        serial: r.serial || null,
+        used_date: r.used_date,
+        product_name: r.product_name || '',
+        qty, unit_cost: unit,
+        total_cost: toInt(r.total_cost) || (qty * unit),
+        notes: r.notes || '',
+      };
+      const { error } = await supa.from('rental_supplies').upsert(row);
+      if (error) throw error;
+      this.data.supplies[r.id] = { ...(this.data.supplies[r.id] || {}), ...row };
+      return this.data.supplies[r.id];
+    },
+    async deleteSupply(id) {
+      const supa = window.totalasAuth;
+      const { error } = await supa.from('rental_supplies').delete().eq('id', id);
+      if (error) throw error;
+      delete this.data.supplies[id];
     },
 
     /** 'BL-2026-NNNN' 다음 번호 생성. 같은 해 billing_no 의 최대 시퀀스 + 1. */

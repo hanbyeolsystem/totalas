@@ -85,7 +85,7 @@ function hideLoading() {
   if (el) el.style.display = 'none';
 }
 
-let state = { selectedId: null, search: '', sort: 'name', bulkSelected: new Set(), showArchived: false };
+let state = { selectedId: null, search: '', sort: 'name', bulkSelected: new Set(), showArchived: false, activeTab: 'info' };
 
 function bindCustomerPage() {
   $('#btn-add').addEventListener('click', () => openCustomerModal(null));
@@ -313,6 +313,12 @@ function renderCustomerDetail(id) {
     </div>
   ` : '';
 
+  // 거래처 바뀌면 탭 초기화
+  if (state._lastCustomerId !== id) {
+    state.activeTab = 'info';
+    state._lastCustomerId = id;
+  }
+
   wrap.innerHTML = archivedBanner + `
     <div class="cust-detail-head">
       <div>
@@ -327,7 +333,7 @@ function renderCustomerDetail(id) {
         ${isArchived ? '' : `<button class="btn ghost small danger" data-del="${c.id}">🗑 삭제</button>`}
       </div>
     </div>`;
-  // 종료 거래처는 상세 폼 생략 - 헤더만 표시하고 끝
+
   if (isArchived) {
     wrap.querySelector(`[data-unarchive="${c.id}"]`)?.addEventListener('click', async () => {
       if (!confirm(`${c.company} 거래처를 복구하시겠어요?`)) return;
@@ -343,8 +349,60 @@ function renderCustomerDetail(id) {
     return;
   }
 
-  wrap.innerHTML += `
+  // 탭 헤더 + 컨테이너
+  const TABS = [
+    { id: 'info',      icon: 'ℹ️', label: '정보' },
+    { id: 'contracts', icon: '📋', label: '계약서' },
+    { id: 'costs',     icon: '💰', label: '원가' },
+    { id: 'visits',    icon: '🔧', label: '출장' },
+    { id: 'supplies',  icon: '📦', label: '소모품' },
+    { id: 'profit',    icon: '📊', label: '수익률' },
+  ];
+  const tabHtml = `
+    <div class="cust-tabs" style="display:flex; gap:4px; flex-wrap:wrap; border-bottom:2px solid var(--border); margin:14px 0;">
+      ${TABS.map(t => `
+        <button class="cust-tab-btn ${state.activeTab === t.id ? 'active' : ''}"
+                data-tab="${t.id}"
+                style="padding:8px 14px; border:none; background:${state.activeTab === t.id ? 'var(--primary, #2563eb)' : 'transparent'}; color:${state.activeTab === t.id ? '#fff' : 'inherit'}; border-radius:6px 6px 0 0; cursor:pointer; font-size:13.5px; font-weight:${state.activeTab === t.id ? '600' : '400'};">
+          <span style="margin-right:4px;">${t.icon}</span>${t.label}
+        </button>`).join('')}
+    </div>
+    <div id="cust-tab-body"></div>
+  `;
+  wrap.innerHTML += tabHtml;
 
+  wrap.querySelector('[data-edit]')?.addEventListener('click', () => openCustomerModal(id));
+  wrap.querySelector('[data-del]')?.addEventListener('click', () => deleteCustomer(id));
+
+  wrap.querySelectorAll('.cust-tab-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      state.activeTab = b.dataset.tab;
+      renderCustomerDetail(id);
+    });
+  });
+
+  renderCustomerTabBody(id, c);
+}
+
+/** 활성 탭에 따른 컨텐츠 렌더 */
+function renderCustomerTabBody(id, c) {
+  const body = document.getElementById('cust-tab-body');
+  if (!body) return;
+  switch (state.activeTab) {
+    case 'info':      renderTabInfo(body, id, c);      break;
+    case 'contracts': renderTabContracts(body, id);    break;
+    case 'costs':     renderTabCosts(body, id);        break;
+    case 'visits':    renderTabVisits(body, id);       break;
+    case 'supplies':  renderTabSupplies(body, id);     break;
+    case 'profit':    renderTabProfit(body, id, c);    break;
+  }
+}
+
+// ============================================================
+// [정보] 탭 — 기존 거래처 상세 정보
+// ============================================================
+function renderTabInfo(body, id, c) {
+  body.innerHTML = `
     <div class="cust-detail-grid">
       <section class="info-card">
         <h4>기본 정보</h4>
@@ -357,7 +415,6 @@ function renderCustomerDetail(id) {
           <dt>종목</dt><dd>${escapeHtml(c.biz_item || '—')}</dd>
         </dl>
       </section>
-
       <section class="info-card">
         <h4>연락처</h4>
         <dl class="info-list">
@@ -368,14 +425,12 @@ function renderCustomerDetail(id) {
           <dt>카카오톡</dt><dd>${escapeHtml(c.kakao || '—')}</dd>
         </dl>
       </section>
-
       <section class="info-card">
         <h4>임대 프린터 (${(c.serials || []).length}대)</h4>
         ${(c.serials || []).length === 0
-          ? '<div class="muted" style="padding:10px 0;">연결된 프린터 없음. [카운터] 탭에서 매칭하세요.</div>'
+          ? '<div class="muted" style="padding:10px 0;">연결된 프린터 없음. [카운터] 페이지에서 매칭하세요.</div>'
           : '<ul class="serial-list">' + c.serials.map(s => `<li><code>${escapeHtml(s)}</code></li>`).join('') + '</ul>'}
       </section>
-
       <section class="info-card">
         <h4>단가 / 청구 조건</h4>
         <dl class="info-list">
@@ -386,40 +441,14 @@ function renderCustomerDetail(id) {
           <dt>컬러 단가</dt><dd>${(c.co_rate || 0).toLocaleString()}원/장</dd>
         </dl>
       </section>
-
-      <section class="info-card">
-        <h4>계약</h4>
-        <dl class="info-list">
-          <dt>계약 시작</dt><dd>${fmtDate(c.contract_start) || '—'}</dd>
-          <dt>계약 만료</dt><dd>${fmtDate(c.contract_end) || '—'}</dd>
-          <dt>계약서</dt><dd>${c.contract_file ? '📎 ' + escapeHtml(c.contract_file) : '<span class="muted">미등록</span>'}</dd>
-        </dl>
-      </section>
-
-      <section class="info-card span-2">
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-          <h4 style="margin:0;">📋 임대 계약서</h4>
-          <div style="display:flex; gap:6px;">
-            <a class="btn small ghost" href="contracts.html?customer=${escapeHtml(id)}">+ 신규 계약서</a>
-          </div>
-        </div>
-        <div id="cust-contracts-${escapeHtml(id)}" style="margin-top:8px;"></div>
-      </section>
-
       <section class="info-card span-2">
         <h4>첨부 서류 (이미지)</h4>
         <div class="att-grid" id="att-grid-${escapeHtml(id)}">
           ${ATTACHMENT_TYPES.map(t => `
             <div class="att-slot-view" data-att-type="${t.key}">
-              <div class="att-slot-head">
-                <span class="att-icon">${t.icon}</span>
-                <span class="att-label">${t.label}</span>
-              </div>
-              <div class="att-slot-body" data-att-empty>
-                <div class="muted-small">미등록</div>
-              </div>
-            </div>
-          `).join('')}
+              <div class="att-slot-head"><span class="att-icon">${t.icon}</span><span class="att-label">${t.label}</span></div>
+              <div class="att-slot-body" data-att-empty><div class="muted-small">미등록</div></div>
+            </div>`).join('')}
         </div>
         <div style="margin-top:14px;">
           <strong style="font-size:12px;color:var(--muted);">메모</strong>
@@ -428,15 +457,454 @@ function renderCustomerDetail(id) {
       </section>
     </div>
   `;
-
-  wrap.querySelector('[data-edit]')?.addEventListener('click', () => openCustomerModal(id));
-  wrap.querySelector('[data-del]')?.addEventListener('click', () => deleteCustomer(id));
-
-  // 계약서 섹션 렌더
-  renderCustomerContracts(id);
-
-  // 첨부 비동기 로드
   loadAndRenderAttachments(id);
+}
+
+// ============================================================
+// [계약서] 탭
+// ============================================================
+function renderTabContracts(body, id) {
+  body.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <h4 style="margin:0;">📋 임대 계약서</h4>
+      <a class="btn small primary" href="contracts.html?customer=${escapeHtml(id)}">+ 신규 계약서</a>
+    </div>
+    <div id="cust-contracts-${escapeHtml(id)}"></div>
+  `;
+  renderCustomerContracts(id);
+}
+
+// ============================================================
+// [원가] 탭 — 제품 매입 원가
+// ============================================================
+function renderTabCosts(body, id) {
+  const items = Object.values(store.data.productCosts || {})
+    .filter(r => r.customer_id === id)
+    .sort((a, b) => (b.purchase_date || '').localeCompare(a.purchase_date || ''));
+  const totalAmort = items.reduce((s, r) => s + (r.amortization_months > 0 ? (r.purchase_price / r.amortization_months) : 0), 0);
+
+  body.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <h4 style="margin:0;">💰 제품 매입 원가 (${items.length}건)</h4>
+      <button class="btn small primary" id="btn-add-cost">+ 원가 추가</button>
+    </div>
+    <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:10px 12px; border-radius:6px; margin-bottom:10px; font-size:13px;">
+      월 감가상각 합계: <strong>${totalAmort.toLocaleString('ko-KR', {maximumFractionDigits:0})}원</strong>
+      <span class="muted-small" style="margin-left:6px;">= Σ(매입가 ÷ 감가월수)</span>
+    </div>
+    ${items.length ? `
+      <div style="overflow-x:auto;">
+        <table class="cost-table" style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#f8fafc;">
+            <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border);">제품</th>
+            <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border);">시리얼</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">매입가</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid var(--border);">구매일</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid var(--border);">감가월</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">월 분할</th>
+            <th style="padding:8px; border-bottom:1px solid var(--border);"></th>
+          </tr></thead>
+          <tbody>
+            ${items.map(r => {
+              const monthly = r.amortization_months > 0 ? Math.round(r.purchase_price / r.amortization_months) : 0;
+              return `<tr>
+                <td style="padding:6px 8px;">${escapeHtml(r.product_name)}</td>
+                <td style="padding:6px 8px;">${escapeHtml(r.serial || '—')}</td>
+                <td style="padding:6px 8px; text-align:right;">${(r.purchase_price||0).toLocaleString()}</td>
+                <td style="padding:6px 8px; text-align:center;">${r.purchase_date || '—'}</td>
+                <td style="padding:6px 8px; text-align:center;">${r.amortization_months}</td>
+                <td style="padding:6px 8px; text-align:right;"><strong>${monthly.toLocaleString()}</strong></td>
+                <td style="padding:6px 8px; text-align:right; white-space:nowrap;">
+                  <button class="btn small ghost" data-edit-cost="${r.id}">✏️</button>
+                  <button class="btn small ghost danger" data-del-cost="${r.id}">🗑</button>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : '<div class="muted" style="padding:24px; text-align:center; border:1px dashed var(--border); border-radius:6px;">등록된 원가가 없습니다.</div>'}
+  `;
+  body.querySelector('#btn-add-cost').addEventListener('click', () => openCostModal(id, null));
+  body.querySelectorAll('[data-edit-cost]').forEach(b => b.addEventListener('click', () => openCostModal(id, b.dataset.editCost)));
+  body.querySelectorAll('[data-del-cost]').forEach(b => b.addEventListener('click', () => onDeleteCost(id, b.dataset.delCost)));
+}
+
+function openCostModal(customerId, costId) {
+  const r = costId ? store.data.productCosts[costId] : {};
+  const printers = Object.values(store.data.printers || {}).filter(p => p.customer_id === customerId);
+  const serialOpts = ['<option value="">(전체)</option>'].concat(printers.map(p => `<option value="${escapeHtml(p.serial)}" ${r.serial === p.serial ? 'selected' : ''}>${escapeHtml(p.serial)} ${p.model ? '· ' + escapeHtml(p.model) : ''}</option>`)).join('');
+  const html = `
+    <h3>${costId ? '✏️ 원가 수정' : '+ 원가 추가'}</h3>
+    <form id="cost-form" autocomplete="off">
+      <div class="form-row two">
+        <label><span>제품명 *</span><input name="product_name" required value="${escapeHtml(r.product_name || '')}"></label>
+        <label><span>시리얼</span><select name="serial">${serialOpts}</select></label>
+      </div>
+      <div class="form-row two">
+        <label><span>매입가 *</span><input name="purchase_price" type="number" min="0" required value="${r.purchase_price || ''}"></label>
+        <label><span>구매일</span><input name="purchase_date" type="date" value="${r.purchase_date || ''}"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>감가상각 개월수</span><input name="amortization_months" type="number" min="1" value="${r.amortization_months || 36}"></label>
+        <label><span>비고</span><input name="notes" value="${escapeHtml(r.notes || '')}"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>취소</button>
+        <button type="submit" class="btn primary">저장</button>
+      </div>
+    </form>`;
+  showModal(html, { wide: false });
+  document.getElementById('cost-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      showLoading('저장 중…');
+      await store.upsertProductCost({
+        id: costId || undefined,
+        customer_id: customerId,
+        serial: fd.get('serial') || null,
+        product_name: fd.get('product_name'),
+        purchase_price: parseInt(fd.get('purchase_price') || 0, 10),
+        purchase_date: fd.get('purchase_date') || null,
+        amortization_months: parseInt(fd.get('amortization_months') || 36, 10),
+        notes: fd.get('notes') || '',
+      });
+      closeModal();
+      renderCustomerTabBody(customerId, store.data.customers[customerId]);
+    } catch (err) { alert('저장 실패: ' + (err.message || err)); }
+    finally { hideLoading(); }
+  });
+}
+
+async function onDeleteCost(customerId, costId) {
+  const r = store.data.productCosts[costId];
+  if (!r) return;
+  if (!confirm(`${r.product_name} 원가를 삭제할까요?`)) return;
+  try { await store.deleteProductCost(costId); renderCustomerTabBody(customerId, store.data.customers[customerId]); }
+  catch (e) { alert('삭제 실패: ' + (e.message || e)); }
+}
+
+// ============================================================
+// [출장] 탭
+// ============================================================
+function renderTabVisits(body, id) {
+  const items = Object.values(store.data.serviceVisits || {})
+    .filter(r => r.customer_id === id)
+    .sort((a, b) => (b.visit_date || '').localeCompare(a.visit_date || ''));
+  const total = items.reduce((s, r) => s + (r.travel_cost || 0) + (r.labor_cost || 0), 0);
+
+  body.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <h4 style="margin:0;">🔧 출장 내역 (${items.length}건)</h4>
+      <button class="btn small primary" id="btn-add-visit">+ 출장 추가</button>
+    </div>
+    <div style="background:#fef3c7; border:1px solid #fde68a; padding:10px 12px; border-radius:6px; margin-bottom:10px; font-size:13px;">
+      누적 출장비 + 공임: <strong>${total.toLocaleString()}원</strong>
+    </div>
+    ${items.length ? `
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#f8fafc;">
+            <th style="padding:8px; text-align:center; border-bottom:1px solid var(--border);">방문일</th>
+            <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border);">목적</th>
+            <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border);">기사</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">출장비</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">공임</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">합계</th>
+            <th style="padding:8px; border-bottom:1px solid var(--border);"></th>
+          </tr></thead>
+          <tbody>
+            ${items.map(r => `<tr>
+              <td style="padding:6px 8px; text-align:center;">${r.visit_date}</td>
+              <td style="padding:6px 8px;">${escapeHtml(r.purpose || '—')}</td>
+              <td style="padding:6px 8px;">${escapeHtml(r.technician || '—')}</td>
+              <td style="padding:6px 8px; text-align:right;">${(r.travel_cost||0).toLocaleString()}</td>
+              <td style="padding:6px 8px; text-align:right;">${(r.labor_cost||0).toLocaleString()}</td>
+              <td style="padding:6px 8px; text-align:right;"><strong>${((r.travel_cost||0)+(r.labor_cost||0)).toLocaleString()}</strong></td>
+              <td style="padding:6px 8px; text-align:right; white-space:nowrap;">
+                <button class="btn small ghost" data-edit-visit="${r.id}">✏️</button>
+                <button class="btn small ghost danger" data-del-visit="${r.id}">🗑</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : '<div class="muted" style="padding:24px; text-align:center; border:1px dashed var(--border); border-radius:6px;">등록된 출장 내역이 없습니다.</div>'}
+  `;
+  body.querySelector('#btn-add-visit').addEventListener('click', () => openVisitModal(id, null));
+  body.querySelectorAll('[data-edit-visit]').forEach(b => b.addEventListener('click', () => openVisitModal(id, b.dataset.editVisit)));
+  body.querySelectorAll('[data-del-visit]').forEach(b => b.addEventListener('click', () => onDeleteVisit(id, b.dataset.delVisit)));
+}
+
+function openVisitModal(customerId, visitId) {
+  const r = visitId ? store.data.serviceVisits[visitId] : {};
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const html = `
+    <h3>${visitId ? '✏️ 출장 수정' : '+ 출장 추가'}</h3>
+    <form id="visit-form" autocomplete="off">
+      <div class="form-row two">
+        <label><span>방문일 *</span><input name="visit_date" type="date" required value="${r.visit_date || todayStr}"></label>
+        <label><span>기사</span><input name="technician" value="${escapeHtml(r.technician || '')}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>목적</span><input name="purpose" placeholder="예: 토너 교체, 드럼 수리" value="${escapeHtml(r.purpose || '')}"></label>
+      </div>
+      <div class="form-row two">
+        <label><span>출장비</span><input name="travel_cost" type="number" min="0" value="${r.travel_cost || 0}"></label>
+        <label><span>공임</span><input name="labor_cost" type="number" min="0" value="${r.labor_cost || 0}"></label>
+      </div>
+      <div class="form-row">
+        <label><span>비고</span><textarea name="notes" rows="2">${escapeHtml(r.notes || '')}</textarea></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>취소</button>
+        <button type="submit" class="btn primary">저장</button>
+      </div>
+    </form>`;
+  showModal(html, { wide: false });
+  document.getElementById('visit-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      showLoading('저장 중…');
+      await store.upsertServiceVisit({
+        id: visitId || undefined,
+        customer_id: customerId,
+        visit_date: fd.get('visit_date'),
+        purpose: fd.get('purpose') || '',
+        technician: fd.get('technician') || '',
+        travel_cost: parseInt(fd.get('travel_cost') || 0, 10),
+        labor_cost: parseInt(fd.get('labor_cost') || 0, 10),
+        notes: fd.get('notes') || '',
+      });
+      closeModal();
+      renderCustomerTabBody(customerId, store.data.customers[customerId]);
+    } catch (err) { alert('저장 실패: ' + (err.message || err)); }
+    finally { hideLoading(); }
+  });
+}
+
+async function onDeleteVisit(customerId, visitId) {
+  const r = store.data.serviceVisits[visitId];
+  if (!r) return;
+  if (!confirm(`${r.visit_date} 출장 내역을 삭제할까요?`)) return;
+  try { await store.deleteServiceVisit(visitId); renderCustomerTabBody(customerId, store.data.customers[customerId]); }
+  catch (e) { alert('삭제 실패: ' + (e.message || e)); }
+}
+
+// ============================================================
+// [소모품] 탭
+// ============================================================
+function renderTabSupplies(body, id) {
+  const items = Object.values(store.data.supplies || {})
+    .filter(r => r.customer_id === id)
+    .sort((a, b) => (b.used_date || '').localeCompare(a.used_date || ''));
+  const total = items.reduce((s, r) => s + (r.total_cost || 0), 0);
+
+  body.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <h4 style="margin:0;">📦 소모품 사용 (${items.length}건)</h4>
+      <button class="btn small primary" id="btn-add-supply">+ 소모품 추가</button>
+    </div>
+    <div style="background:#dbeafe; border:1px solid #93c5fd; padding:10px 12px; border-radius:6px; margin-bottom:10px; font-size:13px;">
+      누적 소모품비: <strong>${total.toLocaleString()}원</strong>
+    </div>
+    ${items.length ? `
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead><tr style="background:#f8fafc;">
+            <th style="padding:8px; text-align:center; border-bottom:1px solid var(--border);">사용일</th>
+            <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border);">소모품</th>
+            <th style="padding:8px; text-align:left; border-bottom:1px solid var(--border);">시리얼</th>
+            <th style="padding:8px; text-align:center; border-bottom:1px solid var(--border);">수량</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">단가</th>
+            <th style="padding:8px; text-align:right; border-bottom:1px solid var(--border);">합계</th>
+            <th style="padding:8px; border-bottom:1px solid var(--border);"></th>
+          </tr></thead>
+          <tbody>
+            ${items.map(r => `<tr>
+              <td style="padding:6px 8px; text-align:center;">${r.used_date}</td>
+              <td style="padding:6px 8px;">${escapeHtml(r.product_name)}</td>
+              <td style="padding:6px 8px;">${escapeHtml(r.serial || '—')}</td>
+              <td style="padding:6px 8px; text-align:center;">${r.qty}</td>
+              <td style="padding:6px 8px; text-align:right;">${(r.unit_cost||0).toLocaleString()}</td>
+              <td style="padding:6px 8px; text-align:right;"><strong>${(r.total_cost||0).toLocaleString()}</strong></td>
+              <td style="padding:6px 8px; text-align:right; white-space:nowrap;">
+                <button class="btn small ghost" data-edit-supply="${r.id}">✏️</button>
+                <button class="btn small ghost danger" data-del-supply="${r.id}">🗑</button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : '<div class="muted" style="padding:24px; text-align:center; border:1px dashed var(--border); border-radius:6px;">등록된 소모품이 없습니다.</div>'}
+  `;
+  body.querySelector('#btn-add-supply').addEventListener('click', () => openSupplyModal(id, null));
+  body.querySelectorAll('[data-edit-supply]').forEach(b => b.addEventListener('click', () => openSupplyModal(id, b.dataset.editSupply)));
+  body.querySelectorAll('[data-del-supply]').forEach(b => b.addEventListener('click', () => onDeleteSupply(id, b.dataset.delSupply)));
+}
+
+function openSupplyModal(customerId, supplyId) {
+  const r = supplyId ? store.data.supplies[supplyId] : {};
+  const printers = Object.values(store.data.printers || {}).filter(p => p.customer_id === customerId);
+  const serialOpts = ['<option value="">(전체)</option>'].concat(printers.map(p => `<option value="${escapeHtml(p.serial)}" ${r.serial === p.serial ? 'selected' : ''}>${escapeHtml(p.serial)} ${p.model ? '· ' + escapeHtml(p.model) : ''}</option>`)).join('');
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const html = `
+    <h3>${supplyId ? '✏️ 소모품 수정' : '+ 소모품 추가'}</h3>
+    <form id="supply-form" autocomplete="off">
+      <div class="form-row two">
+        <label><span>사용일 *</span><input name="used_date" type="date" required value="${r.used_date || todayStr}"></label>
+        <label><span>시리얼</span><select name="serial">${serialOpts}</select></label>
+      </div>
+      <div class="form-row">
+        <label><span>소모품명 *</span><input name="product_name" required placeholder="예: 교세라 토너 TK-8345" value="${escapeHtml(r.product_name || '')}"></label>
+      </div>
+      <div class="form-row three">
+        <label><span>수량</span><input name="qty" type="number" min="1" value="${r.qty || 1}" id="sup-qty"></label>
+        <label><span>단가</span><input name="unit_cost" type="number" min="0" value="${r.unit_cost || 0}" id="sup-unit"></label>
+        <label><span>합계 (자동)</span><input name="total_cost" type="number" min="0" value="${r.total_cost || 0}" id="sup-total"></label>
+      </div>
+      <div class="form-row">
+        <label><span>비고</span><input name="notes" value="${escapeHtml(r.notes || '')}"></label>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-close>취소</button>
+        <button type="submit" class="btn primary">저장</button>
+      </div>
+    </form>`;
+  showModal(html, { wide: false });
+  const recalc = () => {
+    const q = parseInt(document.getElementById('sup-qty').value || 0, 10);
+    const u = parseInt(document.getElementById('sup-unit').value || 0, 10);
+    document.getElementById('sup-total').value = q * u;
+  };
+  document.getElementById('sup-qty').addEventListener('input', recalc);
+  document.getElementById('sup-unit').addEventListener('input', recalc);
+  document.getElementById('supply-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      showLoading('저장 중…');
+      const qty = parseInt(fd.get('qty') || 1, 10);
+      const unit = parseInt(fd.get('unit_cost') || 0, 10);
+      await store.upsertSupply({
+        id: supplyId || undefined,
+        customer_id: customerId,
+        serial: fd.get('serial') || null,
+        used_date: fd.get('used_date'),
+        product_name: fd.get('product_name'),
+        qty, unit_cost: unit,
+        total_cost: parseInt(fd.get('total_cost') || (qty * unit), 10),
+        notes: fd.get('notes') || '',
+      });
+      closeModal();
+      renderCustomerTabBody(customerId, store.data.customers[customerId]);
+    } catch (err) { alert('저장 실패: ' + (err.message || err)); }
+    finally { hideLoading(); }
+  });
+}
+
+async function onDeleteSupply(customerId, supplyId) {
+  const r = store.data.supplies[supplyId];
+  if (!r) return;
+  if (!confirm(`${r.used_date} ${r.product_name} 을 삭제할까요?`)) return;
+  try { await store.deleteSupply(supplyId); renderCustomerTabBody(customerId, store.data.customers[customerId]); }
+  catch (e) { alert('삭제 실패: ' + (e.message || e)); }
+}
+
+// ============================================================
+// [수익률] 탭 — 자동 계산
+// ============================================================
+function renderTabProfit(body, id, c) {
+  // 임대 시작일 — c.contract_start 우선, 없으면 가장 빠른 계약 contract_date, 없으면 created_at
+  let startDate = c.contract_start || c.created_at;
+  for (const ct of Object.values(store.data.contracts || {})) {
+    if (ct.customer_id === id && ct.contract_date) {
+      if (!startDate || ct.contract_date < startDate) startDate = ct.contract_date;
+    }
+  }
+  const start = startDate ? new Date(startDate) : new Date();
+  const today = new Date();
+  const months = Math.max(1, monthsBetween(start, today));
+
+  // === 매출 ===
+  const baseFee = c.base_fee || 0;
+  const billings = Object.values(store.data.billings || {}).filter(b => b.customer_id === id);
+  const totalExtra = billings.reduce((s, b) => s + (b.total_bw_fee || 0) + (b.total_co_fee || 0), 0);
+  const monthlyExtraAvg = months ? totalExtra / months : 0;
+  const monthlyRevenue = baseFee + monthlyExtraAvg;
+
+  // === 원가 ===
+  const costs = Object.values(store.data.productCosts || {}).filter(r => r.customer_id === id);
+  const monthlyAmort = costs.reduce((s, r) => s + (r.amortization_months > 0 ? (r.purchase_price / r.amortization_months) : 0), 0);
+  const visits = Object.values(store.data.serviceVisits || {}).filter(r => r.customer_id === id);
+  const visitTotal = visits.reduce((s, r) => s + (r.travel_cost||0) + (r.labor_cost||0), 0);
+  const monthlyVisit = months ? visitTotal / months : 0;
+  const supplies = Object.values(store.data.supplies || {}).filter(r => r.customer_id === id);
+  const supplyTotal = supplies.reduce((s, r) => s + (r.total_cost||0), 0);
+  const monthlySupply = months ? supplyTotal / months : 0;
+  const monthlyCost = monthlyAmort + monthlyVisit + monthlySupply;
+
+  // === 순익 ===
+  const monthlyProfit = monthlyRevenue - monthlyCost;
+  const profitRate = monthlyRevenue > 0 ? (monthlyProfit / monthlyRevenue * 100) : 0;
+
+  // 누적
+  const cumRevenue = monthlyRevenue * months;
+  const cumCost    = monthlyCost * months;
+  const cumProfit  = cumRevenue - cumCost;
+
+  const fmt = n => Math.round(n).toLocaleString('ko-KR');
+  const rateColor = profitRate >= 30 ? '#16a34a' : profitRate >= 10 ? '#ca8a04' : '#dc2626';
+
+  body.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+      <h4 style="margin:0;">📊 수익률 대시보드</h4>
+      <div class="muted-small">기간: ${startDate ? startDate.slice(0,10) : '?'} ~ 오늘 · <strong>${months}개월</strong></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:18px;">
+      <div style="background:#dbeafe; border:1px solid #93c5fd; padding:12px 14px; border-radius:8px;">
+        <div class="muted-small">월 매출</div>
+        <div style="font-size:20px; font-weight:700; margin-top:4px;">${fmt(monthlyRevenue)}원</div>
+        <div class="muted-small" style="margin-top:4px;">기본료 ${fmt(baseFee)} + 추가카운터 평균 ${fmt(monthlyExtraAvg)}</div>
+      </div>
+      <div style="background:#fee2e2; border:1px solid #fca5a5; padding:12px 14px; border-radius:8px;">
+        <div class="muted-small">월 원가</div>
+        <div style="font-size:20px; font-weight:700; margin-top:4px;">${fmt(monthlyCost)}원</div>
+        <div class="muted-small" style="margin-top:4px;">감가 ${fmt(monthlyAmort)} + 출장 ${fmt(monthlyVisit)} + 소모품 ${fmt(monthlySupply)}</div>
+      </div>
+      <div style="background:#f0fdf4; border:1px solid #86efac; padding:12px 14px; border-radius:8px;">
+        <div class="muted-small">월 순익</div>
+        <div style="font-size:22px; font-weight:800; margin-top:4px; color:${monthlyProfit >= 0 ? '#16a34a' : '#dc2626'};">${fmt(monthlyProfit)}원</div>
+      </div>
+      <div style="background:#fef3c7; border:1px solid #fcd34d; padding:12px 14px; border-radius:8px;">
+        <div class="muted-small">수익률</div>
+        <div style="font-size:26px; font-weight:800; margin-top:4px; color:${rateColor};">${profitRate.toFixed(1)}%</div>
+      </div>
+    </div>
+
+    <div style="background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:14px 16px;">
+      <h4 style="margin:0 0 10px 0;">📅 누적 (${months}개월)</h4>
+      <table style="width:100%; font-size:13.5px;">
+        <tr><td class="muted">누적 매출</td><td style="text-align:right;"><strong>${fmt(cumRevenue)}원</strong></td></tr>
+        <tr><td class="muted">누적 원가</td><td style="text-align:right;">${fmt(cumCost)}원</td></tr>
+        <tr style="border-top:1px solid var(--border);"><td class="muted">누적 순익</td><td style="text-align:right; color:${cumProfit>=0?'#16a34a':'#dc2626'};"><strong>${fmt(cumProfit)}원</strong></td></tr>
+      </table>
+    </div>
+
+    <details style="margin-top:14px;">
+      <summary style="cursor:pointer; font-size:12.5px; color:var(--muted);">계산 근거</summary>
+      <div style="font-size:12px; padding:10px; background:#f8fafc; border-radius:6px; margin-top:6px;">
+        <div>• 추가카운터 평균 = 청구 이력 ${billings.length}건의 (흑+컬 추가료) 합 ÷ ${months}개월</div>
+        <div>• 감가상각 = ${costs.length}건 (Σ 매입가 ÷ 감가월수)</div>
+        <div>• 출장 평균 = ${visits.length}건 누적 ${fmt(visitTotal)}원 ÷ ${months}개월</div>
+        <div>• 소모품 평균 = ${supplies.length}건 누적 ${fmt(supplyTotal)}원 ÷ ${months}개월</div>
+      </div>
+    </details>
+  `;
+}
+
+function monthsBetween(d1, d2) {
+  return Math.max(1, (d2.getFullYear() - d1.getFullYear()) * 12 + (d2.getMonth() - d1.getMonth()) + 1);
 }
 
 /** 거래처별 계약서 목록 렌더 (renderCustomerDetail 내부에서 호출). */
