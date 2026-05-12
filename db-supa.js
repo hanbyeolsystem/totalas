@@ -40,15 +40,28 @@
         return out;
       };
 
+      // customers: archived_at 컬럼 없는 구버전 DB 호환 — 실패 시 필터 없이 재시도
+      const fetchCustomers = async () => {
+        try {
+          return await fetchAll('rental_customers', q => q.is('archived_at', null));
+        } catch (e) {
+          if (/archived_at/.test(String(e?.message || e))) {
+            console.warn('[store] rental_customers.archived_at 컬럼 없음 — 필터 미적용 (01_alter_schema.sql 적용 필요)');
+            return await fetchAll('rental_customers');
+          }
+          throw e;
+        }
+      };
+
       const [custs, prints, counters, contracts, meetings, prices, archive, billings] = await Promise.all([
-        fetchAll('rental_customers', q => q.is('archived_at', null)),
+        fetchCustomers(),
         fetchAll('rental_printers'),
         fetchAll('rental_counters'),
         fetchAll('rental_contracts'),
         fetchAll('rental_meetings'),
         fetchAll('rental_prices'),
         fetchAll('rental_archive'),
-        fetchAll('rental_extra_billings').catch(() => []),  // 테이블 없으면 빈 배열
+        fetchAll('rental_extra_billings').catch(() => []),
       ]);
 
       // customers: id 키
@@ -166,7 +179,12 @@
         const r = await supa.from('rental_customers').select('*')
           .not('archived_at', 'is', null)
           .range(from, from + page - 1);
-        if (r.error) throw r.error;
+        if (r.error) {
+          if (/archived_at/.test(String(r.error?.message || ''))) {
+            throw new Error('DB에 archived_at 컬럼이 없습니다. 01_alter_schema.sql 을 먼저 실행해주세요.');
+          }
+          throw r.error;
+        }
         all.push(...(r.data || []));
         if (!r.data || r.data.length < page) break;
         from += page;
