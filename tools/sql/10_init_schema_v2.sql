@@ -42,10 +42,7 @@ CREATE TABLE IF NOT EXISTS rental_items (
   serial        TEXT,
   install_date  DATE,
   status        TEXT DEFAULT 'active',           -- active / replaced / returned / lost
-  age_months    INTEGER GENERATED ALWAYS AS (
-                  GREATEST(0, EXTRACT(YEAR  FROM age(coalesce(install_date, now()::date)))::int * 12
-                            + EXTRACT(MONTH FROM age(coalesce(install_date, now()::date)))::int)
-                ) STORED,
+  -- age_months 는 GENERATED 불가(now() 비-IMMUTABLE). 클라이언트가 install_date 로 계산.
   storage_gb    INTEGER,                          -- NAS 전용
   notes         TEXT,
   created_at    TIMESTAMPTZ DEFAULT now(),
