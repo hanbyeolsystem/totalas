@@ -43,6 +43,62 @@ function getLatestPeriod() {
   return periods[periods.length - 1] || '';
 }
 
+/** 거래처별 수익률 계산 — app.js renderTabProfit 와 동일 공식.
+ *  대량 호출 대비 인덱스 한 번만 만들고 재사용. */
+let _profitIndex = null;
+function buildProfitIndex() {
+  const idx = { contracts: {}, billings: {}, costs: {}, visits: {}, supplies: {} };
+  for (const ct of Object.values(store.data.contracts || {})) {
+    if (!ct.customer_id) continue;
+    (idx.contracts[ct.customer_id] = idx.contracts[ct.customer_id] || []).push(ct);
+  }
+  for (const b of Object.values(store.data.billings || {})) {
+    (idx.billings[b.customer_id] = idx.billings[b.customer_id] || []).push(b);
+  }
+  for (const r of Object.values(store.data.productCosts || {})) {
+    (idx.costs[r.customer_id] = idx.costs[r.customer_id] || []).push(r);
+  }
+  for (const r of Object.values(store.data.serviceVisits || {})) {
+    (idx.visits[r.customer_id] = idx.visits[r.customer_id] || []).push(r);
+  }
+  for (const r of Object.values(store.data.supplies || {})) {
+    (idx.supplies[r.customer_id] = idx.supplies[r.customer_id] || []).push(r);
+  }
+  return idx;
+}
+
+function computeCustomerProfit(c, idx) {
+  // 임대 시작일
+  let startDate = c.contract_start || c.created_at;
+  const cts = (idx.contracts[c.id] || []);
+  for (const ct of cts) {
+    if (ct.contract_date && (!startDate || ct.contract_date < startDate)) startDate = ct.contract_date;
+  }
+  const start = startDate ? new Date(startDate) : new Date();
+  const today = new Date();
+  const months = Math.max(1,
+    (today.getFullYear() - start.getFullYear()) * 12 + (today.getMonth() - start.getMonth()) + 1);
+
+  const baseFee = c.base_fee || 0;
+  const billings = idx.billings[c.id] || [];
+  const totalExtra = billings.reduce((s, b) => s + (b.total_bw_fee || 0) + (b.total_co_fee || 0), 0);
+  const monthlyExtraAvg = totalExtra / months;
+  const monthlyRevenue = baseFee + monthlyExtraAvg;
+
+  const costs = idx.costs[c.id] || [];
+  const monthlyAmort = costs.reduce((s, r) => s + (r.amortization_months > 0 ? (r.purchase_price / r.amortization_months) : 0), 0);
+  const visits = idx.visits[c.id] || [];
+  const monthlyVisit = visits.reduce((s, r) => s + (r.travel_cost || 0) + (r.labor_cost || 0), 0) / months;
+  const sups = idx.supplies[c.id] || [];
+  const monthlySupply = sups.reduce((s, r) => s + (r.total_cost || 0), 0) / months;
+  const monthlyCost = monthlyAmort + monthlyVisit + monthlySupply;
+
+  const monthlyProfit = monthlyRevenue - monthlyCost;
+  const profitRate = monthlyRevenue > 0 ? (monthlyProfit / monthlyRevenue * 100) : 0;
+
+  return { months, monthlyRevenue, monthlyCost, monthlyProfit, profitRate };
+}
+
 function getLatestCountersForCustomer(custId, latestPeriod) {
   if (!latestPeriod) return { bw: 0, co: 0 };
   const cust = store.data.customers[custId];
@@ -82,6 +138,32 @@ function renderHomeStats() {
 
   document.getElementById('s-latest').innerHTML = `${latestCount}<span class="unit">대</span>`;
   document.getElementById('s-latest-sub').textContent = latest ? `${latest} 카운터 보유` : '카운터 데이터 없음';
+
+  // 수익률 — 원가/출장/소모품 데이터가 1개라도 있는 거래처 대상
+  _profitIndex = buildProfitIndex();
+  const haveAny = id => (_profitIndex.costs[id]?.length || _profitIndex.visits[id]?.length || _profitIndex.supplies[id]?.length);
+  const profitable = customers
+    .filter(c => haveAny(c.id))
+    .map(c => computeCustomerProfit(c, _profitIndex));
+
+  const rateEl = document.getElementById('s-profit-rate');
+  const rateSub = document.getElementById('s-profit-rate-sub');
+  const lossEl = document.getElementById('s-loss');
+  const lossSub = document.getElementById('s-loss-sub');
+  if (!profitable.length) {
+    rateEl.textContent = '—';
+    rateSub.textContent = '원가/출장/소모품 데이터 미입력';
+    lossEl.textContent = '—';
+    lossSub.textContent = '데이터 입력 시 자동 표시';
+    return;
+  }
+  const avgRate = profitable.reduce((s, p) => s + p.profitRate, 0) / profitable.length;
+  const losses = profitable.filter(p => p.monthlyProfit < 0).length;
+  const rateColor = avgRate >= 30 ? '#16a34a' : avgRate >= 10 ? '#ca8a04' : '#dc2626';
+  rateEl.innerHTML = `<span style="color:${rateColor};">${avgRate.toFixed(1)}<span class="unit">%</span></span>`;
+  rateSub.textContent = `원가 입력된 ${profitable.length}곳 평균`;
+  lossEl.innerHTML = `${losses}<span class="unit">곳</span>`;
+  lossSub.textContent = losses ? `월 순익 < 0 인 거래처` : '🎉 적자 거래처 없음';
 }
 
 function renderHomeTable() {
@@ -93,8 +175,27 @@ function renderHomeTable() {
       [c.company, c.ceo, c.phone, c.address].some(v => (v || '').toLowerCase().includes(f))
     );
   }
+
+  // 수익률 계산 (모든 거래처)
+  if (!_profitIndex) _profitIndex = buildProfitIndex();
+  const profitMap = {};
+  for (const c of custs) profitMap[c.id] = computeCustomerProfit(c, _profitIndex);
+
   if (homeState.sort === 'fee') {
     custs.sort((a, b) => (b.base_fee || 0) - (a.base_fee || 0));
+  } else if (homeState.sort === 'profit') {
+    custs.sort((a, b) => profitMap[b.id].monthlyProfit - profitMap[a.id].monthlyProfit);
+  } else if (homeState.sort === 'rate-desc') {
+    custs.sort((a, b) => profitMap[b.id].profitRate - profitMap[a.id].profitRate);
+  } else if (homeState.sort === 'rate-asc') {
+    // 적자 위로 — 단, 데이터 없는 거래처는 뒤로
+    custs.sort((a, b) => {
+      const ha = (profitMap[a.id].monthlyCost > 0);
+      const hb = (profitMap[b.id].monthlyCost > 0);
+      if (ha && !hb) return -1;
+      if (!ha && hb) return 1;
+      return profitMap[a.id].profitRate - profitMap[b.id].profitRate;
+    });
   } else if (homeState.sort === 'serials') {
     custs.sort((a, b) => ((b.serials || []).length) - ((a.serials || []).length));
   } else if (homeState.sort === 'recent') {
@@ -108,7 +209,7 @@ function renderHomeTable() {
   const latest = getLatestPeriod();
   const tbody = document.getElementById('home-cust-tbody');
   if (custs.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="padding:20px; text-align:center; color:var(--muted);">조건에 맞는 거래처가 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:20px; text-align:center; color:var(--muted);">조건에 맞는 거래처가 없습니다.</td></tr>';
     return;
   }
 
@@ -116,11 +217,23 @@ function renderHomeTable() {
     const cnt = getLatestCountersForCustomer(c.id, latest);
     const fee = c.base_fee || 0;
     const sCnt = (c.serials || []).length;
+    const p = profitMap[c.id];
+    // 원가/출장/소모품 데이터 없으면 수익률 정보 표시 안함
+    const hasCostData = p.monthlyCost > 0;
+    const profit = hasCostData ? p.monthlyProfit : null;
+    const rate   = hasCostData ? p.profitRate   : null;
+    const profitColor = profit == null ? 'color:var(--muted);' : profit >= 0 ? 'color:#16a34a;' : 'color:#dc2626;';
+    const rateColor   = rate == null ? 'color:var(--muted);'
+                       : rate >= 30 ? 'color:#16a34a; font-weight:600;'
+                       : rate >= 10 ? 'color:#ca8a04;'
+                       : 'color:#dc2626; font-weight:600;';
     return `
       <tr style="border-bottom:1px solid var(--border);">
         <td style="padding:8px 10px;"><a href="customers.html" style="color:var(--primary); text-decoration:none;">${escapeHtml(c.company || '(이름없음)')}</a></td>
         <td style="padding:8px 10px;">${escapeHtml(c.ceo || '—')}</td>
         <td style="padding:8px 10px; text-align:right; font-variant-numeric:tabular-nums; ${fee ? 'color:var(--primary); font-weight:500;' : 'color:var(--muted);'}">${fee ? fee.toLocaleString() : '—'}</td>
+        <td style="padding:8px 10px; text-align:right; font-variant-numeric:tabular-nums; ${profitColor}">${profit == null ? '—' : Math.round(profit).toLocaleString()}</td>
+        <td style="padding:8px 10px; text-align:right; ${rateColor}">${rate == null ? '—' : rate.toFixed(1) + '%'}</td>
         <td style="padding:8px 10px; text-align:right; ${sCnt ? '' : 'color:var(--muted);'}">${sCnt || '—'}</td>
         <td style="padding:8px 10px; text-align:right; font-variant-numeric:tabular-nums; ${cnt.bw ? '' : 'color:var(--muted);'}">${cnt.bw ? cnt.bw.toLocaleString() : '—'}</td>
         <td style="padding:8px 10px; text-align:right; font-variant-numeric:tabular-nums; ${cnt.co ? '' : 'color:var(--muted);'}">${cnt.co ? cnt.co.toLocaleString() : '—'}</td>

@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<script>location.replace('asms.html');</script>
-<title>이동 중…</title>
+<title>임대홈 — 한별 임대</title>
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="config.js"></script>
@@ -19,24 +18,17 @@
   <aside class="sidebar" id="sidebar">
     <a href="index.html" class="sidebar-brand">
       <span class="brand-mark">🖨</span>
-      <span class="brand-text">한별시스템</span>
-    </a>
-    <a href="asms.html" class="sidebar-tool">
-      <span class="nav-icon">🛠</span><span>접수관리툴</span>
-    </a>
-    <a href="errorcode.html" class="sidebar-tool">
-      <span class="nav-icon">🔧</span><span>에러코드</span>
+      <span class="brand-text">한별 임대</span>
     </a>
     <div class="sidebar-section-label">임대 관리</div>
     <nav class="sidebar-nav">
-      <a href="lease/index.html" class="active"><span class="nav-icon">🏠</span><span>임대홈</span></a>
-      <a href="lease/customers.html"><span class="nav-icon">👥</span><span>임대거래처</span></a>
-      <a href="lease/counters.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
+      <a href="index.html" class="active"><span class="nav-icon">🏠</span><span>임대홈</span></a>
+      <a href="customers.html"><span class="nav-icon">👥</span><span>임대거래처</span></a>
+      <a href="counters.html"><span class="nav-icon">🖨</span><span>임대카운터</span></a>
       <a href="billing.html"><span class="nav-icon">💰</span><span>임대추가요금청구</span></a>
-      <a href="lease/prices.html"><span class="nav-icon">💵</span><span>가격표</span></a>
-      <a href="lease/meetings.html"><span class="nav-icon">🎙</span><span>음성미팅관리</span></a>
-      <a href="lease/archive.html"><span class="nav-icon">📁</span><span>고객자료실</span></a>
-      <a href="admin-users.html" data-role-only="admin"><span class="nav-icon">👑</span><span>사용자 관리</span></a>
+      <a href="prices.html"><span class="nav-icon">💵</span><span>가격표</span></a>
+      <a href="meetings.html"><span class="nav-icon">🎙</span><span>음성미팅관리</span></a>
+      <a href="archive.html"><span class="nav-icon">📁</span><span>고객자료실</span></a>
     </nav>
     <div class="sidebar-foot">한별시스템<br>053-588-7119</div>
   </aside>
@@ -79,6 +71,16 @@
           <div class="stat-value" id="s-latest">—</div>
           <div class="stat-sub muted" id="s-latest-sub">로드 중…</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">평균 수익률</div>
+          <div class="stat-value" id="s-profit-rate">—</div>
+          <div class="stat-sub muted" id="s-profit-rate-sub">로드 중…</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">적자 거래처</div>
+          <div class="stat-value" id="s-loss" style="color:#dc2626;">—</div>
+          <div class="stat-sub muted" id="s-loss-sub">로드 중…</div>
+        </div>
       </section>
 
       <!-- 거래처 한눈에 -->
@@ -91,6 +93,9 @@
             <input type="text" id="home-search" placeholder="🔍 회사명·대표자·주소 검색" style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; min-width:200px;">
             <select id="home-sort" style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px;">
               <option value="fee">기본료 많은순</option>
+              <option value="profit">월 순익 많은순</option>
+              <option value="rate-desc">수익률 높은순</option>
+              <option value="rate-asc">수익률 낮은순 (적자 위)</option>
               <option value="serials">시리얼 많은순</option>
               <option value="name">이름순</option>
               <option value="recent">최근 등록순</option>
@@ -107,6 +112,8 @@
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border);">회사명</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border);">대표자</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">월 기본료</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">월 순익</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">수익률</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">시리얼</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">최신 BW</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">최신 CO</th>

@@ -71,6 +71,16 @@
           <div class="stat-value" id="s-latest">—</div>
           <div class="stat-sub muted" id="s-latest-sub">로드 중…</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">평균 수익률</div>
+          <div class="stat-value" id="s-profit-rate">—</div>
+          <div class="stat-sub muted" id="s-profit-rate-sub">로드 중…</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">적자 거래처</div>
+          <div class="stat-value" id="s-loss" style="color:#dc2626;">—</div>
+          <div class="stat-sub muted" id="s-loss-sub">로드 중…</div>
+        </div>
       </section>
 
       <!-- 거래처 한눈에 -->
@@ -83,6 +93,9 @@
             <input type="text" id="home-search" placeholder="🔍 회사명·대표자·주소 검색" style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; min-width:200px;">
             <select id="home-sort" style="padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px;">
               <option value="fee">기본료 많은순</option>
+              <option value="profit">월 순익 많은순</option>
+              <option value="rate-desc">수익률 높은순</option>
+              <option value="rate-asc">수익률 낮은순 (적자 위)</option>
               <option value="serials">시리얼 많은순</option>
               <option value="name">이름순</option>
               <option value="recent">최근 등록순</option>
@@ -99,6 +112,8 @@
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border);">회사명</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border);">대표자</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">월 기본료</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">월 순익</th>
+                <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">수익률</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">시리얼</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">최신 BW</th>
                 <th style="padding:8px 10px; border-bottom:1px solid var(--border); text-align:right;">최신 CO</th>
