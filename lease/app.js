@@ -85,7 +85,7 @@ function hideLoading() {
   if (el) el.style.display = 'none';
 }
 
-let state = { selectedId: null, search: '', sort: 'name', bulkSelected: new Set() };
+let state = { selectedId: null, search: '', sort: 'name', bulkSelected: new Set(), showArchived: false };
 
 function bindCustomerPage() {
   $('#btn-add').addEventListener('click', () => openCustomerModal(null));
@@ -101,6 +101,22 @@ function bindCustomerPage() {
   });
   $('#cust-sort').addEventListener('change', e => {
     state.sort = e.target.value;
+    renderCustomerList();
+  });
+  // archived 토글
+  document.getElementById('cust-show-archived')?.addEventListener('change', async (e) => {
+    state.showArchived = e.target.checked;
+    if (state.showArchived && !store._archivedLoaded) {
+      try {
+        showLoading('종료된 거래처 로드 중…');
+        await store.loadArchivedCustomers();
+      } catch (err) {
+        alert('종료된 거래처 로드 실패: ' + (err.message || err));
+        e.target.checked = false;
+        state.showArchived = false;
+        return;
+      } finally { hideLoading(); }
+    }
     renderCustomerList();
   });
 
@@ -132,6 +148,15 @@ function renderCustomerList() {
   const ul = $('#cust-list');
   const cnt = $('#cust-count');
   let customers = Object.values(store.data.customers);
+  // archived 포함 토글
+  if (state.showArchived && store.data.customersArchived) {
+    customers = customers.concat(Object.values(store.data.customersArchived));
+  }
+  const archivedCount = state.showArchived
+    ? (Object.keys(store.data.customersArchived || {}).length)
+    : null;
+  const acEl = document.getElementById('cust-archived-count');
+  if (acEl) acEl.textContent = archivedCount != null ? `(${archivedCount}곳 포함됨)` : '';
 
   // 검색 필터
   if (state.search) {
@@ -176,20 +201,23 @@ function renderCustomerList() {
     </li>
   `;
 
-  ul.innerHTML = bulkBar + customers.map(c => `
-    <li class="cust-item ${state.selectedId === c.id ? 'selected' : ''}" data-id="${c.id}" style="display:flex; align-items:center; gap:8px;">
+  ul.innerHTML = bulkBar + customers.map(c => {
+    const isArchived = !!c.archived_at;
+    return `
+    <li class="cust-item ${state.selectedId === c.id ? 'selected' : ''} ${isArchived ? 'archived' : ''}" data-id="${c.id}" style="display:flex; align-items:center; gap:8px; ${isArchived ? 'opacity:0.6;' : ''}">
       <label class="cust-item-check" style="padding:4px 4px 4px 8px; cursor:pointer;">
-        <input type="checkbox" data-bulk="${c.id}" ${state.bulkSelected.has(c.id) ? 'checked' : ''} style="width:16px; height:16px;">
+        <input type="checkbox" data-bulk="${c.id}" ${state.bulkSelected.has(c.id) ? 'checked' : ''} ${isArchived ? 'disabled' : ''} style="width:16px; height:16px;">
       </label>
       <div style="flex:1; min-width:0;">
-        <div class="cust-item-name">${escapeHtml(c.company)}</div>
+        <div class="cust-item-name" style="${isArchived ? 'text-decoration:line-through;' : ''}">${escapeHtml(c.company)}</div>
         <div class="cust-item-meta">
+          ${isArchived ? `<span class="badge" style="background:#fee2e2; color:#991b1b;" title="${escapeHtml(c.archived_reason || '')}">📦 종료</span>` : ''}
           ${c.ceo ? `<span>${escapeHtml(c.ceo)}</span>` : ''}
           ${(c.serials?.length) ? `<span class="badge">🖨 ${c.serials.length}대</span>` : ''}
         </div>
       </div>
-    </li>
-  `).join('');
+    </li>`;
+  }).join('');
 
   // 체크박스: li 클릭으로 전파되지 않게
   ul.querySelectorAll('input[data-bulk]').forEach(cb => {
@@ -266,14 +294,26 @@ function selectCustomer(id) {
 // 거래처 상세 렌더
 // ============================================================
 function renderCustomerDetail(id) {
-  const c = store.data.customers[id];
+  const c = store.data.customers[id] || (store.data.customersArchived || {})[id];
   const wrap = $('#cust-detail');
   if (!c) {
     wrap.innerHTML = `<div class="cust-empty"><div class="cust-empty-icon">👈</div><div class="cust-empty-title">거래처를 선택하거나</div><div class="cust-empty-sub muted">우측 상단에서 새 거래처 추가</div></div>`;
     return;
   }
 
-  wrap.innerHTML = `
+  const isArchived = !!c.archived_at;
+  const archivedBanner = isArchived ? `
+    <div style="background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 14px; border-radius:8px; margin-bottom:14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <span style="font-size:18px;">📦</span>
+      <div style="flex:1; min-width:220px;">
+        <div style="font-weight:700;">이 거래처는 종료 처리됨</div>
+        <div style="font-size:12px; opacity:0.85;">사유: ${escapeHtml(c.archived_reason || '—')} · ${fmtDate(c.archived_at)}</div>
+      </div>
+      <button class="btn small primary" data-unarchive="${c.id}">↻ 복구</button>
+    </div>
+  ` : '';
+
+  wrap.innerHTML = archivedBanner + `
     <div class="cust-detail-head">
       <div>
         <h2>${escapeHtml(c.company)}</h2>
@@ -283,10 +323,27 @@ function renderCustomerDetail(id) {
         </div>
       </div>
       <div class="cust-detail-actions">
-        <button class="btn ghost small" data-edit="${c.id}">✏️ 수정</button>
-        <button class="btn ghost small danger" data-del="${c.id}">🗑 삭제</button>
+        ${isArchived ? '' : `<button class="btn ghost small" data-edit="${c.id}">✏️ 수정</button>`}
+        ${isArchived ? '' : `<button class="btn ghost small danger" data-del="${c.id}">🗑 삭제</button>`}
       </div>
-    </div>
+    </div>`;
+  // 종료 거래처는 상세 폼 생략 - 헤더만 표시하고 끝
+  if (isArchived) {
+    wrap.querySelector(`[data-unarchive="${c.id}"]`)?.addEventListener('click', async () => {
+      if (!confirm(`${c.company} 거래처를 복구하시겠어요?`)) return;
+      try {
+        showLoading('복구 중…');
+        await store.unarchiveCustomer(c.id);
+        renderCustomerList();
+        renderCustomerDetail(c.id);
+        alert('복구되었습니다.');
+      } catch (e) { alert('복구 실패: ' + (e.message || e)); }
+      finally { hideLoading(); }
+    });
+    return;
+  }
+
+  wrap.innerHTML += `
 
     <div class="cust-detail-grid">
       <section class="info-card">

@@ -155,6 +155,65 @@
       delete this.data.customers[id];
     },
 
+    /** archive 된 거래처를 별도 load 해 this.data.customersArchived 에 채움. (최초 1회) */
+    async loadArchivedCustomers() {
+      if (this._archivedLoaded) return this.data.customersArchived || {};
+      const supa = window.totalasAuth;
+      const all = [];
+      const page = 1000;
+      let from = 0;
+      while (true) {
+        const r = await supa.from('rental_customers').select('*')
+          .not('archived_at', 'is', null)
+          .range(from, from + page - 1);
+        if (r.error) throw r.error;
+        all.push(...(r.data || []));
+        if (!r.data || r.data.length < page) break;
+        from += page;
+      }
+      this.data.customersArchived = {};
+      for (const c of all) {
+        this.data.customersArchived[c.id] = {
+          ...c,
+          serials: Array.isArray(c.serials) ? c.serials : [],
+        };
+      }
+      this._archivedLoaded = true;
+      return this.data.customersArchived;
+    },
+
+    /** archive 복구 — archived_at=null 로 다시 활성화. */
+    async unarchiveCustomer(id) {
+      const supa = window.totalasAuth;
+      const { error } = await supa.from('rental_customers')
+        .update({ archived_at: null, archived_reason: null }).eq('id', id);
+      if (error) throw error;
+      const row = (this.data.customersArchived || {})[id];
+      if (row) {
+        row.archived_at = null;
+        row.archived_reason = null;
+        this.data.customers[id] = row;
+        delete this.data.customersArchived[id];
+      }
+    },
+
+    /** 거래처 archive (soft delete). */
+    async archiveCustomer(id, reason) {
+      const supa = window.totalasAuth;
+      const at = new Date().toISOString();
+      const { error } = await supa.from('rental_customers')
+        .update({ archived_at: at, archived_reason: reason || '' }).eq('id', id);
+      if (error) throw error;
+      const row = this.data.customers[id];
+      if (row) {
+        row.archived_at = at;
+        row.archived_reason = reason || '';
+        if (!this.data.customersArchived) this.data.customersArchived = {};
+        this.data.customersArchived[id] = row;
+        delete this.data.customers[id];
+      }
+    },
+
     // ============================================================
     // 프린터 / 시리얼
     // ============================================================
