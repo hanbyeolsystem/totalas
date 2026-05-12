@@ -544,7 +544,7 @@ function collectFormData() {
   return c;
 }
 
-function saveCurrentContract() {
+async function saveCurrentContract() {
   const c = collectFormData();
 
   if (!c.company || !c.company.trim()) {
