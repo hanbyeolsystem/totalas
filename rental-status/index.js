@@ -1,46 +1,36 @@
-// ===========================================================
-// totalas — 임대현황 (rental-status) 모듈
-// Supabase 실데이터 기반 자산 가동률/노후도/카테고리 분포
-// 의존: window.totalasAuth (auth.js 가 부착), supabase-js v2
-// ===========================================================
+// ============================================================
+// totalas — 임대현황 v2 (rental-status)
+// 거래처 / 자산 / 노후도 / 메모 — 4탭 종합 대시보드
+// 의존: window.totalasAuth (auth.js), supabase-js v2
+// ============================================================
 (function () {
   'use strict';
 
-  // ----- 상수 -----
+  // ---------- 상수 ----------
   const CATEGORIES = ['IT', '출력', '위생'];
-  const SUBTYPES_BY_CAT = {
-    'IT':    ['PC', 'monitor', 'NAS'],
-    '출력':  ['잉크젯', '레이저', '복합기'],
-    '위생':  ['웰리스'],
+  const REPLACE_THRESHOLD_MONTHS = 60; // 5년
+  const WARN_THRESHOLD_MONTHS = 36;    // 3년
+  const MAX_RENDER = 1000;
+
+  // ---------- 상태 ----------
+  const state = {
+    customers: [],
+    items: [],
+    assignments: [],
+    activeTab: 'customers',
+    loaded: false,
+    filters: {
+      cust: { q: '', pay: '', cat: '' },
+      item: { q: '', cat: '', sub: '', status: '', assign: '' },
+      age:  { q: '', cat: '', band: '' },
+      memo: { q: '', kind: '' },
+    },
   };
-  const REPLACE_THRESHOLD_MONTHS = 60; // 5년 이상 -> 교체 검토
 
-  // ----- 상태 -----
-  /** @type {{items: any[], assignments: any[], customers: any[]}} */
-  const state = { items: [], assignments: [], customers: [] };
-  const filters = { q: '', cat: '', sub: '', status: '', assign: '' };
-
-  // ----- DOM 헬퍼 -----
+  // ---------- DOM 헬퍼 ----------
   const $ = (sel, root) => (root || document).querySelector(sel);
   const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
-  function el(tag, attrs, ...children) {
-    const e = document.createElement(tag);
-    if (attrs) {
-      for (const [k, v] of Object.entries(attrs)) {
-        if (k === 'class') e.className = v;
-        else if (k === 'style') e.style.cssText = v;
-        else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
-        else if (v != null) e.setAttribute(k, v);
-      }
-    }
-    for (const c of children) {
-      if (c == null || c === false) continue;
-      e.appendChild(typeof c === 'string' || typeof c === 'number'
-        ? document.createTextNode(String(c))
-        : c);
-    }
-    return e;
-  }
+
   function escapeHtml(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, m =>
       ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
@@ -50,62 +40,90 @@
     const s = String(d);
     return s.length >= 10 ? s.slice(0, 10) : s;
   }
+  function fmtMoney(n) {
+    if (n == null || Number.isNaN(Number(n))) return '–';
+    return Math.round(Number(n)).toLocaleString('ko-KR');
+  }
+  function todayStr() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  }
+  function timeStr() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  function debounce(fn, ms) {
+    let t = null;
+    return function () {
+      const args = arguments;
+      clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
+    };
+  }
 
-  // ----- 노후도 계산 (DB age_months 없거나 누락 시 fallback) -----
-  function computeAgeMonths(item) {
-    if (item.age_months != null && !Number.isNaN(Number(item.age_months))) {
-      return Math.max(0, Math.round(Number(item.age_months)));
-    }
-    if (!item.install_date) return null;
+  // ---------- 노후도 ----------
+  function ageMonths(item) {
+    if (!item || !item.install_date) return null;
     const ins = new Date(item.install_date);
     if (Number.isNaN(ins.getTime())) return null;
     const now = new Date();
-    return (now.getFullYear() - ins.getFullYear()) * 12
-         + (now.getMonth() - ins.getMonth());
+    const m = (now.getFullYear() - ins.getFullYear()) * 12
+            + (now.getMonth() - ins.getMonth());
+    return Math.max(0, m);
   }
-  function agePill(months) {
-    if (months == null) return '<span class="age-pill ok">–</span>';
-    let cls = 'ok';
-    if (months >= REPLACE_THRESHOLD_MONTHS) cls = 'bad';
-    else if (months >= 36) cls = 'warn';
-    return `<span class="age-pill ${cls}">${months}개월</span>`;
+  function ageBand(m) {
+    if (m == null) return 'none';
+    if (m >= REPLACE_THRESHOLD_MONTHS) return 'bad';
+    if (m >= WARN_THRESHOLD_MONTHS) return 'warn';
+    return 'ok';
   }
-  function statusTag(s) {
+  function agePillHtml(m) {
+    const band = ageBand(m);
+    const label = m == null ? '–' : `${m}개월`;
+    return `<span class="age-pill ${band}">${label}</span>`;
+  }
+  function statusTagHtml(s) {
     const safe = String(s || 'active').toLowerCase();
     return `<span class="status-tag ${safe}">${escapeHtml(safe)}</span>`;
   }
+  function payTagHtml(p) {
+    if (!p) return '<span class="muted-cell">–</span>';
+    const safe = String(p);
+    return `<span class="pay-tag ${escapeHtml(safe)}">${escapeHtml(safe)}</span>`;
+  }
 
-  // ----- 데이터 로드 -----
+  // ---------- 데이터 로딩 ----------
   async function loadAll() {
     const supa = window.totalasAuth;
     if (!supa) throw new Error('Supabase 클라이언트(window.totalasAuth) 미초기화');
 
-    // PostgREST 기본 1000 row 한도 → .range(0, 9999) 로 여유 확보
-    const [itRes, asRes, cuRes] = await Promise.all([
+    const [cuRes, itRes, asRes] = await Promise.all([
+      supa.from('rental_customers').select('*').range(0, 9999),
       supa.from('rental_items').select('*').range(0, 9999),
       supa.from('rental_assignments').select('*').range(0, 9999),
-      supa.from('rental_customers').select('id, company, contact_name, active').range(0, 9999),
     ]);
-
+    if (cuRes.error) throw cuRes.error;
     if (itRes.error) throw itRes.error;
     if (asRes.error) throw asRes.error;
-    if (cuRes.error) throw cuRes.error;
 
+    state.customers = cuRes.data || [];
     state.items = itRes.data || [];
     state.assignments = asRes.data || [];
-    state.customers = cuRes.data || [];
+    state.loaded = true;
   }
 
-  // ----- 파생 데이터 -----
-  /** 활성(end_date 없거나 미래) 배정만 추출 */
-  function activeAssignments() {
-    const today = new Date().toISOString().slice(0, 10);
-    return state.assignments.filter(a => !a.end_date || a.end_date >= today);
+  // ---------- 파생 데이터 (Map 조인) ----------
+  function activeAssignmentsList() {
+    const t = todayStr();
+    return state.assignments.filter(a =>
+      (!a.end_date || a.end_date >= t) &&
+      (!a.start_date || a.start_date <= t));
   }
-  /** item_id → 활성 배정 (최신 시작일) */
   function buildItemAssignMap() {
     const map = new Map();
-    const acts = activeAssignments().sort((a, b) =>
+    const acts = activeAssignmentsList().sort((a, b) =>
       String(b.start_date || '').localeCompare(String(a.start_date || '')));
     for (const a of acts) {
       if (!map.has(a.item_id)) map.set(a.item_id, a);
@@ -117,349 +135,754 @@
     for (const c of state.customers) m.set(c.id, c);
     return m;
   }
+  function buildItemMap() {
+    const m = new Map();
+    for (const it of state.items) m.set(it.id, it);
+    return m;
+  }
+  /** customer_id -> { items: [...], assignments: [...activeOnly], monthlyFee, byCat:{IT,출력,위생,...}, maxAge } */
+  function buildCustomerStats() {
+    const itemMap = buildItemMap();
+    const stats = new Map();
+    const acts = activeAssignmentsList();
+    for (const a of acts) {
+      const it = itemMap.get(a.item_id);
+      if (!it) continue;
+      const s = stats.get(a.customer_id) || {
+        items: [],
+        assignments: [],
+        monthlyFee: 0,
+        byCat: {},
+        maxAge: null,
+      };
+      s.items.push(it);
+      s.assignments.push(a);
+      s.monthlyFee += Number(a.monthly_fee || 0);
+      const c = it.category || '기타';
+      s.byCat[c] = (s.byCat[c] || 0) + 1;
+      const ag = ageMonths(it);
+      if (ag != null) s.maxAge = s.maxAge == null ? ag : Math.max(s.maxAge, ag);
+      stats.set(a.customer_id, s);
+    }
+    return stats;
+  }
 
-  // ----- 렌더링 -----
-  function renderStats() {
+  // ---------- 상단 요약 ----------
+  function renderTopStats() {
+    const activeCust = state.customers.filter(c => c.active !== false && !c.archived_at);
     const items = state.items;
-    const total = items.length;
-    const active = items.filter(i => (i.status || 'active') === 'active').length;
-    const assignMap = buildItemAssignMap();
-    const idle = items.filter(i => (i.status || 'active') === 'active' && !assignMap.has(i.id)).length;
-
     const activeItems = items.filter(i => (i.status || 'active') === 'active');
-    const ages = activeItems.map(computeAgeMonths).filter(v => v != null);
+    const acts = activeAssignmentsList();
+
+    const totalFee = acts.reduce((s, a) => s + Number(a.monthly_fee || 0), 0);
+
+    const ages = activeItems.map(ageMonths).filter(v => v != null);
     const avgAge = ages.length ? Math.round(ages.reduce((s, v) => s + v, 0) / ages.length) : null;
     const old5y = activeItems.filter(i => {
-      const m = computeAgeMonths(i);
+      const m = ageMonths(i);
       return m != null && m >= REPLACE_THRESHOLD_MONTHS;
     }).length;
-    const util = total ? Math.round((active - idle) / Math.max(1, total) * 100) : 0;
 
-    $('#stat-total').textContent = total.toLocaleString();
-    $('#stat-total-sub').textContent = `등록된 자산 총 ${total.toLocaleString()}건`;
-    $('#stat-active').textContent = active.toLocaleString();
-    $('#stat-active-sub').textContent = total
-      ? `${Math.round(active / total * 100)}% (활성/전체)` : '–';
-    $('#stat-idle').textContent = idle.toLocaleString();
-    $('#stat-idle-sub').textContent = active
-      ? `활성 자산 중 ${Math.round(idle / Math.max(1, active) * 100)}%` : '–';
+    const util = items.length ? Math.round(activeItems.length / items.length * 100) : 0;
+
+    $('#stat-cust').textContent = activeCust.length.toLocaleString();
+    $('#stat-cust-sub').textContent = `전체 ${state.customers.length.toLocaleString()}개사`;
+
+    $('#stat-items').textContent = items.length.toLocaleString();
+    $('#stat-items-sub').textContent = `활성 ${activeItems.length.toLocaleString()} · 배정 ${acts.length.toLocaleString()}`;
+
+    $('#stat-fee').innerHTML = `${fmtMoney(totalFee)}<span class="unit">원</span>`;
+    $('#stat-fee-sub').textContent = `배정 ${acts.length.toLocaleString()}건 합산`;
+
     $('#stat-avgage').innerHTML = avgAge != null
-      ? `${avgAge}<span class="unit">개월</span>` : '–';
+      ? `${avgAge}<span class="unit">개월</span>` : `–<span class="unit">개월</span>`;
     $('#stat-avgage-sub').textContent = ages.length
-      ? `${ages.length}건 평균` : '도입일 없음';
+      ? `${ages.length.toLocaleString()}건 평균` : '도입일 없음';
+
     $('#stat-old5y').textContent = old5y.toLocaleString();
-    $('#stat-old5y-sub').textContent = `60개월(5년)↑`;
     $('#stat-util').innerHTML = `${util}<span class="unit">%</span>`;
   }
 
-  function renderCategoryGrid() {
-    const grid = $('#cat-grid');
-    grid.innerHTML = '';
+  // ---------- 카테고리 빠른 분포 ----------
+  function renderCatRow() {
+    const row = $('#rs-cat-row');
+    // 라벨 이외 제거
+    Array.from(row.querySelectorAll('.cat-pill')).forEach(p => p.remove());
 
-    // 카테고리 → subtype → count 집계
     const counts = {};
-    for (const c of CATEGORIES) {
-      counts[c] = {};
-      for (const s of (SUBTYPES_BY_CAT[c] || [])) counts[c][s] = 0;
-      counts[c].__OTHER__ = 0;
-    }
     for (const it of state.items) {
-      const cat = counts[it.category] ? it.category : null;
-      if (!cat) continue;
-      const sub = it.subtype || '';
-      if (counts[cat][sub] != null) counts[cat][sub] += 1;
-      else counts[cat].__OTHER__ += 1;
+      const c = it.category || '기타';
+      counts[c] = (counts[c] || 0) + 1;
     }
-
-    const ICONS = { 'IT':'💻', '출력':'🖨', '위생':'🌿' };
-
-    for (const cat of CATEGORIES) {
-      const subs = SUBTYPES_BY_CAT[cat] || [];
-      const tot = Object.values(counts[cat]).reduce((s, v) => s + v, 0);
-      const ul = el('ul');
-      for (const s of subs) {
-        ul.appendChild(el('li', null,
-          el('span', { class: 'sub-name' }, `${s}`),
-          el('span', { class: 'sub-count' }, `${counts[cat][s]}건`)));
-      }
-      if (counts[cat].__OTHER__ > 0) {
-        ul.appendChild(el('li', null,
-          el('span', { class: 'sub-name' }, '(기타)'),
-          el('span', { class: 'sub-count' }, `${counts[cat].__OTHER__}건`)));
-      }
-      const card = el('div', { class: 'cat-card' },
-        el('h3', null,
-          document.createTextNode(`${ICONS[cat] || '📦'} ${cat}`),
-          el('span', { class: 'muted-small' }, `${tot}건`)),
-        el('div', { class: 'cat-total' }, `${tot}`),
-        ul);
-      grid.appendChild(card);
-    }
-  }
-
-  function renderNasArea() {
-    const area = $('#nas-area');
-    area.innerHTML = '';
-
-    const nasItems = state.items.filter(i =>
-      (i.subtype === 'NAS') || (i.storage_gb != null));
-
-    if (nasItems.length === 0) {
-      area.appendChild(el('div', { class: 'nas-card' },
-        el('div', { class: 'nas-icon' }, '💾'),
-        el('div', { class: 'nas-text' },
-          el('h3', null, 'NAS 자산 없음 — 확장 대비 영역'),
-          el('p', null,
-            '차후 NAS 렌탈 도입 시 ',
-            el('code', null, 'rental_items.storage_gb'),
-            ' 컬럼에 용량(GB)을 기록하면 이 영역에 표시됩니다.'))));
-      return;
-    }
-
-    const totalGB = nasItems.reduce((s, i) => s + (Number(i.storage_gb) || 0), 0);
-    const card = el('div', { class: 'card', style: 'padding: 4px;' });
-    const wrap = el('div', { class: 'scroll-x' });
-    const table = el('table', { class: 'data-table' });
-    table.innerHTML = `
-      <thead><tr>
-        <th>#</th><th>브랜드 / 모델</th><th>시리얼</th>
-        <th class="num">용량(GB)</th><th>도입일</th><th class="num">노후도</th><th>상태</th>
-      </tr></thead><tbody></tbody>`;
-    const tb = $('tbody', table);
-    nasItems
-      .sort((a, b) => (Number(b.storage_gb) || 0) - (Number(a.storage_gb) || 0))
-      .forEach((it, idx) => {
-        const m = computeAgeMonths(it);
-        tb.insertAdjacentHTML('beforeend', `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
-            <td>${escapeHtml(it.serial || '–')}</td>
-            <td class="num">${it.storage_gb != null ? Number(it.storage_gb).toLocaleString() : '–'}</td>
-            <td>${fmtDate(it.install_date)}</td>
-            <td class="num">${agePill(m)}</td>
-            <td>${statusTag(it.status)}</td>
-          </tr>`);
+    // 카테고리 순서: IT, 출력, 위생, 기타
+    const order = [...CATEGORIES, ...Object.keys(counts).filter(c => !CATEGORIES.includes(c))];
+    for (const c of order) {
+      if (!counts[c]) continue;
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.className = 'cat-pill';
+      pill.innerHTML = `<span>${escapeHtml(c)}</span><span class="cat-pill-count">${counts[c]}</span>`;
+      pill.addEventListener('click', () => {
+        // 자산 탭으로 이동 + 카테고리 필터 적용
+        state.filters.item.cat = c;
+        switchTab('items');
+        const sel = $('#if-cat');
+        if (sel) sel.value = c;
+        renderItemsTab();
       });
-    wrap.appendChild(table);
-    card.appendChild(wrap);
-
-    const summary = el('div', { class: 'muted-small', style:'padding:8px 12px; text-align:right;' },
-      `NAS 자산 ${nasItems.length}건 · 누적 용량 ${totalGB.toLocaleString()} GB`);
-    card.appendChild(summary);
-    area.appendChild(card);
+      row.appendChild(pill);
+    }
   }
 
-  function renderAgeTop() {
-    const tb = $('#age-top-table tbody');
-    tb.innerHTML = '';
-    const rows = state.items
-      .map(it => ({ it, age: computeAgeMonths(it) }))
-      .filter(x => x.age != null)
-      .sort((a, b) => b.age - a.age)
-      .slice(0, 10);
+  // ---------- 탭 카운터 ----------
+  function refreshTabCounts() {
+    $('#tc-customers').textContent =
+      state.customers.filter(c => c.active !== false && !c.archived_at).length.toLocaleString();
+    $('#tc-items').textContent = state.items.length.toLocaleString();
+    $('#tc-age').textContent = state.items.length.toLocaleString();
 
-    if (rows.length === 0) {
-      tb.innerHTML = `<tr><td colspan="9" class="empty-row">노후도 계산 가능한 자산이 없습니다.</td></tr>`;
-      return;
-    }
-    rows.forEach(({ it, age }, idx) => {
-      const replace = age >= REPLACE_THRESHOLD_MONTHS;
-      tb.insertAdjacentHTML('beforeend', `
-        <tr>
-          <td>${idx + 1}</td>
-          <td>${escapeHtml(it.category || '–')}</td>
-          <td>${escapeHtml(it.subtype || '–')}</td>
-          <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
-          <td>${escapeHtml(it.serial || '–')}</td>
-          <td class="num">${agePill(age)}</td>
-          <td>${fmtDate(it.install_date)}</td>
-          <td>${statusTag(it.status)}</td>
-          <td>${replace ? '<span class="replace-tag">교체</span>' : ''}</td>
-        </tr>`);
+    let memoCount = 0;
+    for (const c of state.customers) if (c.notes && String(c.notes).trim()) memoCount++;
+    for (const it of state.items) if (it.notes && String(it.notes).trim()) memoCount++;
+    $('#tc-memo').textContent = memoCount.toLocaleString();
+  }
+
+  // ---------- 탭 전환 ----------
+  function switchTab(tab) {
+    state.activeTab = tab;
+    $$('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+    });
+    $$('.tab-panel').forEach(p => {
+      p.style.display = p.dataset.tab === tab ? '' : 'none';
     });
   }
 
-  function renderIdleTable() {
-    const tb = $('#idle-table tbody');
-    tb.innerHTML = '';
-    const assignMap = buildItemAssignMap();
-    const idle = state.items.filter(i =>
-      (i.status || 'active') === 'active' && !assignMap.has(i.id));
+  // ========================================================
+  // 거래처별 탭
+  // ========================================================
+  function renderCustomersTab() {
+    const tbody = $('#cust-table tbody');
+    tbody.innerHTML = '';
 
-    $('#idle-hint').textContent = `활성이지만 거래처 미배정 · 총 ${idle.length}건`;
-    if (idle.length === 0) {
-      tb.innerHTML = `<tr><td colspan="8" class="empty-row">🎉 모든 활성 자산이 배정되었습니다.</td></tr>`;
-      return;
-    }
-    idle
-      .sort((a, b) => (computeAgeMonths(b) ?? -1) - (computeAgeMonths(a) ?? -1))
-      .forEach((it, idx) => {
-        const m = computeAgeMonths(it);
-        tb.insertAdjacentHTML('beforeend', `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${escapeHtml(it.category || '–')}</td>
-            <td>${escapeHtml(it.subtype || '–')}</td>
-            <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
-            <td>${escapeHtml(it.serial || '–')}</td>
-            <td class="num">${agePill(m)}</td>
-            <td>${fmtDate(it.install_date)}</td>
-            <td>${statusTag(it.status)}</td>
-          </tr>`);
+    const f = state.filters.cust;
+    const q = f.q.trim().toLowerCase();
+    const stats = buildCustomerStats();
+
+    // 활성 + 아카이브 안된 거래처
+    let rows = state.customers
+      .filter(c => c.active !== false && !c.archived_at)
+      .map(c => {
+        const s = stats.get(c.id) || { items: [], monthlyFee: 0, byCat: {}, maxAge: null };
+        return { c, s };
       });
-  }
 
-  // ===== 전체 자산 (검색·필터) =====
-  function populateFilterSelects() {
-    const cats = new Set();
-    const subs = new Set();
-    for (const it of state.items) {
-      if (it.category) cats.add(it.category);
-      if (it.subtype)  subs.add(it.subtype);
-    }
-    const fCat = $('#f-cat');
-    const fSub = $('#f-sub');
-    for (const c of Array.from(cats).sort()) fCat.appendChild(el('option', { value: c }, c));
-    for (const s of Array.from(subs).sort()) fSub.appendChild(el('option', { value: s }, s));
-  }
-
-  function renderAllTable() {
-    const tb = $('#all-table tbody');
-    tb.innerHTML = '';
-    const assignMap = buildItemAssignMap();
-    const custMap = buildCustomerMap();
-
-    const q = filters.q.trim().toLowerCase();
-    const filtered = state.items.filter(it => {
-      if (filters.cat && it.category !== filters.cat) return false;
-      if (filters.sub && it.subtype !== filters.sub) return false;
-      if (filters.status && (it.status || 'active') !== filters.status) return false;
-      const has = assignMap.has(it.id);
-      if (filters.assign === 'assigned' && !has) return false;
-      if (filters.assign === 'idle' && has) return false;
+    rows = rows.filter(({ c, s }) => {
+      if (f.pay && c.payment_type !== f.pay) return false;
+      if (f.cat && !s.byCat[f.cat]) return false;
       if (q) {
-        const hay = [it.brand, it.model, it.serial, it.notes, it.subtype, it.category]
+        const hay = [c.company, c.address, c.notes, c.contact_name]
           .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
         if (!hay.includes(q)) return false;
       }
       return true;
     });
 
-    $('#f-count').textContent = `${filtered.length.toLocaleString()} 건`;
+    // 정렬: 자산수 desc, 회사명 asc
+    rows.sort((a, b) =>
+      (b.s.items.length - a.s.items.length) ||
+      String(a.c.company || '').localeCompare(String(b.c.company || ''), 'ko'));
 
-    if (filtered.length === 0) {
-      tb.innerHTML = `<tr><td colspan="9" class="empty-row">조건에 맞는 자산이 없습니다.</td></tr>`;
+    $('#cf-count').textContent = `${rows.length.toLocaleString()} 건`;
+
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="11" class="empty-row">조건에 맞는 거래처가 없습니다.</td></tr>`;
       return;
     }
 
-    // 최대 500건만 렌더 (모바일 성능)
-    const MAX_RENDER = 500;
-    const slice = filtered.slice(0, MAX_RENDER);
-    const html = slice.map((it, idx) => {
-      const m = computeAgeMonths(it);
+    const slice = rows.slice(0, MAX_RENDER);
+    const html = slice.map(({ c, s }, idx) => {
+      const dist = Object.entries(s.byCat)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `<span class="mini-pill ${escapeHtml(k)}">${escapeHtml(k)} ${v}</span>`)
+        .join(' ');
+      const memoText = (c.notes && String(c.notes).trim())
+        ? (String(c.notes).length > 60
+            ? String(c.notes).slice(0, 60) + '…'
+            : String(c.notes))
+        : '';
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td><strong>${escapeHtml(c.company || '–')}</strong>${c.contact_name ? `<br><span class="muted-cell" style="font-size:11.5px;">${escapeHtml(c.contact_name)}</span>` : ''}</td>
+          <td class="num">${s.items.length.toLocaleString()}</td>
+          <td><span class="mini-cat-dist">${dist || '<span class="muted-cell">–</span>'}</span></td>
+          <td class="num">${s.monthlyFee > 0 ? fmtMoney(s.monthlyFee) : '<span class="muted-cell">–</span>'}</td>
+          <td class="hide-mobile">${escapeHtml(c.address || '–')}</td>
+          <td>${payTagHtml(c.payment_type)}</td>
+          <td class="num hide-mobile">${c.invoice_day != null ? escapeHtml(String(c.invoice_day)) + '일' : '<span class="muted-cell">–</span>'}</td>
+          <td class="num hide-mobile">${c.deposit ? fmtMoney(c.deposit) : '<span class="muted-cell">–</span>'}</td>
+          <td class="num">${agePillHtml(s.maxAge)}</td>
+          <td class="hide-mobile"><span class="memo-cell">${memoText ? escapeHtml(memoText) : '<span class="muted-cell">–</span>'}</span></td>
+        </tr>`;
+    }).join('');
+    tbody.insertAdjacentHTML('beforeend', html);
+
+    if (rows.length > MAX_RENDER) {
+      tbody.insertAdjacentHTML('beforeend',
+        `<tr><td colspan="11" class="empty-row">… 외 ${rows.length - MAX_RENDER}건 (필터를 좁혀 주세요)</td></tr>`);
+    }
+  }
+
+  // ========================================================
+  // 자산별 탭
+  // ========================================================
+  function getItemRows() {
+    const assignMap = buildItemAssignMap();
+    const custMap = buildCustomerMap();
+    return state.items.map(it => {
       const a = assignMap.get(it.id);
       const cust = a && custMap.get(a.customer_id);
-      const custLabel = cust
-        ? escapeHtml(cust.company || cust.contact_name || '–')
-        : '<span class="muted">미배정</span>';
+      return {
+        it,
+        assignment: a || null,
+        customer: cust || null,
+        ageM: ageMonths(it),
+      };
+    });
+  }
+  function renderItemsTab() {
+    const tbody = $('#item-table tbody');
+    tbody.innerHTML = '';
+    const f = state.filters.item;
+    const q = f.q.trim().toLowerCase();
+
+    let rows = getItemRows();
+
+    rows = rows.filter(({ it, customer, assignment }) => {
+      if (f.cat && it.category !== f.cat) return false;
+      if (f.sub && it.subtype !== f.sub) return false;
+      if (f.status && (it.status || 'active') !== f.status) return false;
+      const has = !!assignment;
+      if (f.assign === 'assigned' && !has) return false;
+      if (f.assign === 'idle' && has) return false;
+      if (q) {
+        const hay = [it.brand, it.model, it.serial, it.subtype, it.category,
+                     it.notes, customer && customer.company]
+          .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    // 정렬: 카테고리 > 품목 > 모델
+    rows.sort((a, b) =>
+      String(a.it.category || '').localeCompare(String(b.it.category || ''), 'ko') ||
+      String(a.it.subtype || '').localeCompare(String(b.it.subtype || ''), 'ko') ||
+      String(a.it.model || '').localeCompare(String(b.it.model || ''), 'ko'));
+
+    $('#if-count').textContent = `${rows.length.toLocaleString()} 건`;
+
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-row">조건에 맞는 자산이 없습니다.</td></tr>`;
+      return;
+    }
+    const slice = rows.slice(0, MAX_RENDER);
+    const html = slice.map(({ it, assignment, customer, ageM }, idx) => {
+      const cust = customer
+        ? `<strong>${escapeHtml(customer.company || '–')}</strong>`
+        : '<span class="muted-cell">미배정</span>';
+      const fee = assignment && Number(assignment.monthly_fee) > 0
+        ? fmtMoney(assignment.monthly_fee) : '<span class="muted-cell">–</span>';
       return `
         <tr>
           <td>${idx + 1}</td>
           <td>${escapeHtml(it.category || '–')}</td>
           <td>${escapeHtml(it.subtype || '–')}</td>
           <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
-          <td>${escapeHtml(it.serial || '–')}</td>
-          <td class="num">${agePill(m)}</td>
-          <td>${fmtDate(it.install_date)}</td>
-          <td>${statusTag(it.status)}</td>
-          <td>${custLabel}</td>
+          <td class="hide-mobile">${escapeHtml(it.serial || '–')}</td>
+          <td>${cust}</td>
+          <td class="num hide-mobile">${fmtDate(it.install_date)}</td>
+          <td class="num">${agePillHtml(ageM)}</td>
+          <td class="num">${fee}</td>
+          <td>${statusTagHtml(it.status)}</td>
         </tr>`;
     }).join('');
-    tb.insertAdjacentHTML('beforeend', html);
+    tbody.insertAdjacentHTML('beforeend', html);
 
-    if (filtered.length > MAX_RENDER) {
-      tb.insertAdjacentHTML('beforeend',
-        `<tr><td colspan="9" class="empty-row">… 외 ${filtered.length - MAX_RENDER}건 (필터를 좁혀 주세요)</td></tr>`);
+    if (rows.length > MAX_RENDER) {
+      tbody.insertAdjacentHTML('beforeend',
+        `<tr><td colspan="10" class="empty-row">… 외 ${rows.length - MAX_RENDER}건</td></tr>`);
     }
   }
 
-  // ----- 이벤트 바인딩 -----
-  function bindFilters() {
-    $('#f-q').addEventListener('input', (e) => {
-      filters.q = e.target.value; renderAllTable();
+  // ========================================================
+  // 노후도 순 탭
+  // ========================================================
+  function renderAgeTab() {
+    const tbody = $('#age-table tbody');
+    tbody.innerHTML = '';
+    const f = state.filters.age;
+    const q = f.q.trim().toLowerCase();
+
+    let rows = getItemRows();
+    rows = rows.filter(({ it, customer, ageM }) => {
+      if (f.cat && it.category !== f.cat) return false;
+      if (f.band && ageBand(ageM) !== f.band) return false;
+      if (q) {
+        const hay = [it.brand, it.model, it.serial, it.subtype, it.category,
+                     customer && customer.company]
+          .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
+        if (!hay.includes(q)) return false;
+      }
+      return true;
     });
-    $('#f-cat').addEventListener('change', (e) => {
-      filters.cat = e.target.value; renderAllTable();
+
+    // 노후도 desc, null 은 맨 아래
+    rows.sort((a, b) => {
+      const aA = a.ageM == null ? -1 : a.ageM;
+      const bA = b.ageM == null ? -1 : b.ageM;
+      return bA - aA;
     });
-    $('#f-sub').addEventListener('change', (e) => {
-      filters.sub = e.target.value; renderAllTable();
-    });
-    $('#f-status').addEventListener('change', (e) => {
-      filters.status = e.target.value; renderAllTable();
-    });
-    $('#f-assign').addEventListener('change', (e) => {
-      filters.assign = e.target.value; renderAllTable();
-    });
-    $('#btn-refresh').addEventListener('click', async () => {
-      $('#btn-refresh').disabled = true;
-      try { await refresh(); } finally { $('#btn-refresh').disabled = false; }
-    });
+
+    $('#af-count').textContent = `${rows.length.toLocaleString()} 건`;
+
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="10" class="empty-row">조건에 맞는 자산이 없습니다.</td></tr>`;
+      return;
+    }
+    const slice = rows.slice(0, MAX_RENDER);
+    const html = slice.map(({ it, customer, ageM }, idx) => {
+      const cust = customer
+        ? escapeHtml(customer.company || '–')
+        : '<span class="muted-cell">미배정</span>';
+      const replace = ageM != null && ageM >= REPLACE_THRESHOLD_MONTHS
+        ? '<span class="replace-tag">교체</span>' : '';
+      return `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(it.category || '–')}</td>
+          <td>${escapeHtml(it.subtype || '–')}</td>
+          <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
+          <td class="hide-mobile">${escapeHtml(it.serial || '–')}</td>
+          <td>${cust}</td>
+          <td class="num hide-mobile">${fmtDate(it.install_date)}</td>
+          <td class="num">${agePillHtml(ageM)}</td>
+          <td>${statusTagHtml(it.status)}</td>
+          <td>${replace}</td>
+        </tr>`;
+    }).join('');
+    tbody.insertAdjacentHTML('beforeend', html);
+
+    if (rows.length > MAX_RENDER) {
+      tbody.insertAdjacentHTML('beforeend',
+        `<tr><td colspan="10" class="empty-row">… 외 ${rows.length - MAX_RENDER}건</td></tr>`);
+    }
   }
 
-  // ----- 메인 -----
+  // ========================================================
+  // 메모/특이사항 탭
+  // ========================================================
+  function getMemoRows() {
+    const rows = [];
+    for (const c of state.customers) {
+      if (c.notes && String(c.notes).trim()) {
+        rows.push({
+          kind: 'customer',
+          target: c.company || c.contact_name || `#${c.id}`,
+          memo: String(c.notes),
+        });
+      }
+    }
+    for (const it of state.items) {
+      if (it.notes && String(it.notes).trim()) {
+        const label = [it.brand, it.model].filter(Boolean).join(' ').trim() ||
+                      it.serial || `#${it.id}`;
+        rows.push({
+          kind: 'item',
+          target: label,
+          memo: String(it.notes),
+        });
+      }
+    }
+    return rows;
+  }
+  function renderMemoTab() {
+    const tbody = $('#memo-table tbody');
+    tbody.innerHTML = '';
+    const f = state.filters.memo;
+    const q = f.q.trim().toLowerCase();
+
+    let rows = getMemoRows();
+    rows = rows.filter(r => {
+      if (f.kind && r.kind !== f.kind) return false;
+      if (q) {
+        const hay = (r.target + ' ' + r.memo).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    rows.sort((a, b) =>
+      String(a.kind).localeCompare(String(b.kind)) ||
+      String(a.target).localeCompare(String(b.target), 'ko'));
+
+    $('#mf-count').textContent = `${rows.length.toLocaleString()} 건`;
+
+    if (rows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="3" class="empty-row">메모가 입력된 항목이 없습니다.</td></tr>`;
+      return;
+    }
+
+    const html = rows.map(r => {
+      const memo = r.memo.length > 200 ? r.memo.slice(0, 200) + '…' : r.memo;
+      const tag = r.kind === 'customer'
+        ? '<span class="kind-tag">거래처</span>'
+        : '<span class="kind-tag item">자산</span>';
+      return `
+        <tr>
+          <td>${tag}</td>
+          <td><strong>${escapeHtml(r.target)}</strong></td>
+          <td><div class="memo-cell">${escapeHtml(memo)}</div></td>
+        </tr>`;
+    }).join('');
+    tbody.insertAdjacentHTML('beforeend', html);
+  }
+
+  // ========================================================
+  // 필터 select 채우기
+  // ========================================================
+  let _selectsBuilt = false;
+  function populateSelectsOnce() {
+    if (_selectsBuilt) return;
+    const cats = new Set();
+    const subs = new Set();
+    for (const it of state.items) {
+      if (it.category) cats.add(it.category);
+      if (it.subtype) subs.add(it.subtype);
+    }
+    const fillSel = (sel, values) => {
+      if (!sel) return;
+      for (const v of Array.from(values).sort()) {
+        const opt = document.createElement('option');
+        opt.value = v; opt.textContent = v;
+        sel.appendChild(opt);
+      }
+    };
+    fillSel($('#if-cat'), cats);
+    fillSel($('#if-sub'), subs);
+    fillSel($('#af-cat'), cats);
+    _selectsBuilt = true;
+  }
+
+  // ========================================================
+  // 이벤트 바인딩
+  // ========================================================
+  function bindEvents() {
+    // 탭
+    $$('.tab-btn').forEach(b => {
+      b.addEventListener('click', () => {
+        switchTab(b.dataset.tab);
+        renderActiveTab();
+      });
+    });
+
+    // 거래처별 필터
+    const debCust = debounce(() => renderCustomersTab(), 150);
+    $('#cf-q').addEventListener('input', e => {
+      state.filters.cust.q = e.target.value; debCust();
+    });
+    $('#cf-pay').addEventListener('change', e => {
+      state.filters.cust.pay = e.target.value; renderCustomersTab();
+    });
+    $('#cf-cat').addEventListener('change', e => {
+      state.filters.cust.cat = e.target.value; renderCustomersTab();
+    });
+
+    // 자산별 필터
+    const debItem = debounce(() => renderItemsTab(), 150);
+    $('#if-q').addEventListener('input', e => {
+      state.filters.item.q = e.target.value; debItem();
+    });
+    $('#if-cat').addEventListener('change', e => {
+      state.filters.item.cat = e.target.value; renderItemsTab();
+    });
+    $('#if-sub').addEventListener('change', e => {
+      state.filters.item.sub = e.target.value; renderItemsTab();
+    });
+    $('#if-status').addEventListener('change', e => {
+      state.filters.item.status = e.target.value; renderItemsTab();
+    });
+    $('#if-assign').addEventListener('change', e => {
+      state.filters.item.assign = e.target.value; renderItemsTab();
+    });
+
+    // 노후도 필터
+    const debAge = debounce(() => renderAgeTab(), 150);
+    $('#af-q').addEventListener('input', e => {
+      state.filters.age.q = e.target.value; debAge();
+    });
+    $('#af-cat').addEventListener('change', e => {
+      state.filters.age.cat = e.target.value; renderAgeTab();
+    });
+    $('#af-band').addEventListener('change', e => {
+      state.filters.age.band = e.target.value; renderAgeTab();
+    });
+
+    // 메모 필터
+    const debMemo = debounce(() => renderMemoTab(), 150);
+    $('#mf-q').addEventListener('input', e => {
+      state.filters.memo.q = e.target.value; debMemo();
+    });
+    $('#mf-kind').addEventListener('change', e => {
+      state.filters.memo.kind = e.target.value; renderMemoTab();
+    });
+
+    // 새로고침
+    $('#btn-refresh').addEventListener('click', async () => {
+      const btn = $('#btn-refresh');
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = '⏳ 로딩…';
+      try { await refresh(); }
+      finally { btn.disabled = false; btn.textContent = orig; }
+    });
+
+    // CSV 내보내기
+    $('#btn-export').addEventListener('click', exportCurrentTabCsv);
+  }
+
+  // ========================================================
+  // CSV 내보내기
+  // ========================================================
+  function csvEscape(v) {
+    if (v == null) return '';
+    const s = String(v);
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  function downloadCsv(filename, rows) {
+    // UTF-8 BOM 추가 (Excel 한글 호환)
+    const BOM = '﻿';
+    const csv = rows.map(r => r.map(csvEscape).join(',')).join('\r\n');
+    const blob = new Blob([BOM + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+  function exportCurrentTabCsv() {
+    const tab = state.activeTab;
+    const date = todayStr();
+    if (tab === 'customers') {
+      const f = state.filters.cust;
+      const q = f.q.trim().toLowerCase();
+      const stats = buildCustomerStats();
+      let rows = state.customers
+        .filter(c => c.active !== false && !c.archived_at)
+        .map(c => ({ c, s: stats.get(c.id) || { items: [], monthlyFee: 0, byCat: {}, maxAge: null } }));
+      rows = rows.filter(({ c, s }) => {
+        if (f.pay && c.payment_type !== f.pay) return false;
+        if (f.cat && !s.byCat[f.cat]) return false;
+        if (q) {
+          const hay = [c.company, c.address, c.notes, c.contact_name]
+            .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      rows.sort((a, b) =>
+        (b.s.items.length - a.s.items.length) ||
+        String(a.c.company || '').localeCompare(String(b.c.company || ''), 'ko'));
+
+      const csv = [['#', '회사명', '담당자', '자산수', '카테고리분포', '월임대료', '주소',
+                    '결제', '청구일', '보증금', '최대노후도(개월)', '메모']];
+      rows.forEach(({ c, s }, idx) => {
+        const dist = Object.entries(s.byCat).map(([k, v]) => `${k}:${v}`).join(' / ');
+        csv.push([
+          idx + 1, c.company || '', c.contact_name || '',
+          s.items.length, dist, s.monthlyFee || 0,
+          c.address || '', c.payment_type || '',
+          c.invoice_day || '', c.deposit || '',
+          s.maxAge == null ? '' : s.maxAge,
+          c.notes || '',
+        ]);
+      });
+      downloadCsv(`임대현황_거래처별_${date}.csv`, csv);
+      return;
+    }
+    if (tab === 'items') {
+      const f = state.filters.item;
+      const q = f.q.trim().toLowerCase();
+      let rows = getItemRows();
+      rows = rows.filter(({ it, customer, assignment }) => {
+        if (f.cat && it.category !== f.cat) return false;
+        if (f.sub && it.subtype !== f.sub) return false;
+        if (f.status && (it.status || 'active') !== f.status) return false;
+        const has = !!assignment;
+        if (f.assign === 'assigned' && !has) return false;
+        if (f.assign === 'idle' && has) return false;
+        if (q) {
+          const hay = [it.brand, it.model, it.serial, it.subtype, it.category,
+                       it.notes, customer && customer.company]
+            .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      rows.sort((a, b) =>
+        String(a.it.category || '').localeCompare(String(b.it.category || ''), 'ko') ||
+        String(a.it.subtype || '').localeCompare(String(b.it.subtype || ''), 'ko') ||
+        String(a.it.model || '').localeCompare(String(b.it.model || ''), 'ko'));
+
+      const csv = [['#', '카테고리', '품목', '브랜드', '모델', '시리얼', '거래처',
+                    '도입일', '노후도(개월)', '월임대료', '상태']];
+      rows.forEach(({ it, assignment, customer, ageM }, idx) => {
+        csv.push([
+          idx + 1, it.category || '', it.subtype || '',
+          it.brand || '', it.model || '', it.serial || '',
+          customer ? (customer.company || '') : '',
+          fmtDate(it.install_date) === '–' ? '' : fmtDate(it.install_date),
+          ageM == null ? '' : ageM,
+          assignment ? (assignment.monthly_fee || 0) : '',
+          it.status || 'active',
+        ]);
+      });
+      downloadCsv(`임대현황_자산별_${date}.csv`, csv);
+      return;
+    }
+    if (tab === 'age') {
+      const f = state.filters.age;
+      const q = f.q.trim().toLowerCase();
+      let rows = getItemRows();
+      rows = rows.filter(({ it, customer, ageM }) => {
+        if (f.cat && it.category !== f.cat) return false;
+        if (f.band && ageBand(ageM) !== f.band) return false;
+        if (q) {
+          const hay = [it.brand, it.model, it.serial, it.subtype, it.category,
+                       customer && customer.company]
+            .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      rows.sort((a, b) => {
+        const aA = a.ageM == null ? -1 : a.ageM;
+        const bA = b.ageM == null ? -1 : b.ageM;
+        return bA - aA;
+      });
+      const csv = [['#', '카테고리', '품목', '브랜드', '모델', '시리얼', '거래처',
+                    '도입일', '노후도(개월)', '상태', '교체권장']];
+      rows.forEach(({ it, customer, ageM }, idx) => {
+        const replace = ageM != null && ageM >= REPLACE_THRESHOLD_MONTHS ? '교체' : '';
+        csv.push([
+          idx + 1, it.category || '', it.subtype || '',
+          it.brand || '', it.model || '', it.serial || '',
+          customer ? (customer.company || '') : '',
+          fmtDate(it.install_date) === '–' ? '' : fmtDate(it.install_date),
+          ageM == null ? '' : ageM,
+          it.status || 'active',
+          replace,
+        ]);
+      });
+      downloadCsv(`임대현황_노후도순_${date}.csv`, csv);
+      return;
+    }
+    if (tab === 'memo') {
+      const f = state.filters.memo;
+      const q = f.q.trim().toLowerCase();
+      let rows = getMemoRows();
+      rows = rows.filter(r => {
+        if (f.kind && r.kind !== f.kind) return false;
+        if (q) {
+          const hay = (r.target + ' ' + r.memo).toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+      rows.sort((a, b) =>
+        String(a.kind).localeCompare(String(b.kind)) ||
+        String(a.target).localeCompare(String(b.target), 'ko'));
+      const csv = [['종류', '대상', '메모']];
+      rows.forEach(r => {
+        csv.push([r.kind === 'customer' ? '거래처' : '자산', r.target, r.memo]);
+      });
+      downloadCsv(`임대현황_메모_${date}.csv`, csv);
+      return;
+    }
+  }
+
+  // ========================================================
+  // 렌더 진입점
+  // ========================================================
+  function renderActiveTab() {
+    if (state.activeTab === 'customers') renderCustomersTab();
+    else if (state.activeTab === 'items') renderItemsTab();
+    else if (state.activeTab === 'age') renderAgeTab();
+    else if (state.activeTab === 'memo') renderMemoTab();
+  }
   function renderAll() {
-    renderStats();
-    renderCategoryGrid();
-    renderNasArea();
-    renderAgeTop();
-    renderIdleTable();
-    renderAllTable();
+    renderTopStats();
+    renderCatRow();
+    refreshTabCounts();
+    populateSelectsOnce();
+    renderActiveTab();
+    $('#last-updated').textContent = timeStr();
   }
 
   async function refresh() {
     try {
       await loadAll();
-      populateFilterSelectsIfEmpty();
       renderAll();
     } catch (err) {
       console.error('[rental-status] 로드 실패:', err);
-      const msg = (err && (err.message || err.hint)) || String(err);
-      // 첫 카드 위에 에러 배너 표기
-      let banner = document.getElementById('rs-err-banner');
-      if (!banner) {
-        banner = el('div', {
-          id: 'rs-err-banner',
-          class: 'card',
-          style: 'padding:14px; border-color:#fecaca; background:#fef2f2; color:#991b1b; margin-bottom:14px;'
-        });
-        $('main.container').insertBefore(banner, $('.stats'));
-      }
-      banner.innerHTML = `⚠️ 데이터 로드 실패: <code>${escapeHtml(msg)}</code><br>
-        <span class="muted-small">Supabase 스키마(rental_items / rental_assignments / rental_customers) 적용 여부를 확인해 주세요.</span>`;
+      showError(err);
     }
   }
 
-  let _filterSelectsBuilt = false;
-  function populateFilterSelectsIfEmpty() {
-    if (_filterSelectsBuilt) return;
-    populateFilterSelects();
-    _filterSelectsBuilt = true;
+  function showError(err) {
+    const msg = (err && (err.message || err.hint)) || String(err);
+    let banner = document.getElementById('rs-err-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'rs-err-banner';
+      banner.className = 'card';
+      banner.style.cssText =
+        'padding:14px; border-color:#fecaca; background:#fef2f2; color:#991b1b; margin-bottom:14px;';
+      const main = $('main.container');
+      main.insertBefore(banner, main.firstChild);
+    }
+    banner.innerHTML =
+      '⚠️ 데이터 로드 실패: <code>' + escapeHtml(msg) + '</code><br>' +
+      '<span class="muted-small">Supabase 스키마(rental_customers / rental_items / rental_assignments) 적용 여부 확인.</span>';
   }
 
-  // window.totalasAuth 는 auth.js 가 비동기 부착 → totalas:ready 이벤트 대기
+  // ========================================================
+  // 부팅
+  // ========================================================
+  function boot() {
+    if (state.loaded) return;
+    refresh();
+  }
+
   function start() {
-    bindFilters();
+    bindEvents();
     if (window.totalasAuth) {
-      refresh();
+      boot();
     } else {
-      document.addEventListener('totalas:ready', () => refresh(), { once: true });
-      // 안전망: 3초 후에도 없으면 에러 표시
+      document.addEventListener('totalas:ready', boot, { once: true });
+      // 안전망
       setTimeout(() => {
-        if (!window.totalasAuth) {
-          console.warn('[rental-status] Supabase 미초기화 — auth.js 확인 필요');
+        if (!state.loaded && !window.totalasAuth) {
+          console.warn('[rental-status] window.totalasAuth 미초기화 — auth.js 점검 필요');
         }
-      }, 3000);
+        if (!state.loaded && window.totalasAuth) boot();
+      }, 2000);
     }
   }
 

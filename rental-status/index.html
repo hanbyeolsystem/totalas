@@ -9,294 +9,539 @@
 <script src="../config.js"></script>
 <script src="../auth.js"></script>
 <style>
-  /* === 임대현황 페이지 전용 인라인 스타일 === */
+  /* ===== 임대현황 v2 — 종합 대시보드 ===== */
+  .rs-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .rs-stats .stat-card {
+    padding: 12px 14px;
+  }
+  .rs-stats .stat-label {
+    font-size: 11.5px;
+  }
+  .rs-stats .stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.4px;
+    margin-top: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .rs-stats .stat-value .unit {
+    font-size: 12px;
+    color: var(--muted);
+    margin-left: 2px;
+    font-weight: 500;
+  }
+  .rs-stats .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* 카테고리 분포 pill row */
+  .rs-cat-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 0 0 14px 0;
+    padding: 10px 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+  }
+  .rs-cat-row .rs-cat-label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-right: 4px;
+  }
+  .cat-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 11px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: #334155;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    transition: all .12s;
+    font-variant-numeric: tabular-nums;
+  }
+  .cat-pill:hover {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+  .cat-pill .cat-pill-count {
+    font-weight: 700;
+    color: var(--text);
+  }
+  .cat-pill:hover .cat-pill-count { color: var(--primary); }
+
+  /* 탭 */
+  .rs-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 2px solid var(--border);
+    margin: 8px 0 14px 0;
+    overflow-x: auto;
+  }
+  .tab-btn {
+    padding: 9px 16px;
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .12s;
+    font-family: inherit;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
+  .tab-btn .tab-count {
+    background: #f1f5f9;
+    color: var(--muted);
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 11px;
+    margin-left: 5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .tab-btn.active .tab-count {
+    background: var(--primary-soft);
+    color: var(--primary);
+  }
+
+  /* 필터바 */
   .filter-bar {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    margin: 12px 0 16px 0;
+    margin: 0 0 12px 0;
   }
   .filter-bar input[type="search"],
   .filter-bar select {
-    padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
-    background: #fff; font-size: 13px; min-width: 130px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    font-size: 13px;
+    min-width: 130px;
+    font-family: inherit;
+    color: var(--text);
   }
   .filter-bar input[type="search"]:focus,
   .filter-bar select:focus {
-    outline: none; border-color: var(--primary);
+    outline: none;
+    border-color: var(--primary);
   }
   .filter-bar .count-pill {
-    margin-left: auto; font-size: 12px; color: var(--muted);
-    background: #f1f5f9; padding: 4px 10px; border-radius: 999px;
+    margin-left: auto;
+    font-size: 12px;
+    color: var(--muted);
+    background: #f1f5f9;
+    padding: 4px 10px;
+    border-radius: 999px;
     font-variant-numeric: tabular-nums;
   }
 
-  .cat-grid {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 14px; margin-bottom: 18px;
+  /* 테이블 */
+  .rs-table-wrap {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
   }
-  .cat-card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-    padding: 14px 16px; box-shadow: var(--shadow);
+  .scroll-x {
+    overflow-x: auto;
+    max-height: calc(100vh - 380px);
+    overflow-y: auto;
   }
-  .cat-card h3 {
-    margin: 0 0 8px 0; font-size: 13px; color: var(--muted); font-weight: 600;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .cat-card .cat-total {
-    font-size: 22px; font-weight: 700; letter-spacing: -.4px;
-    font-variant-numeric: tabular-nums;
-  }
-  .cat-card ul {
-    list-style: none; padding: 8px 0 0 0; margin: 8px 0 0 0;
-    border-top: 1px solid var(--border); font-size: 13px;
-  }
-  .cat-card ul li {
-    display: flex; justify-content: space-between; padding: 4px 0;
-    font-variant-numeric: tabular-nums;
-  }
-  .cat-card ul li .sub-name { color: var(--text-soft, #334155); }
-  .cat-card ul li .sub-count { color: var(--muted); }
-
   table.data-table {
-    width: 100%; border-collapse: collapse; font-size: 13px;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
   }
-  table.data-table th, table.data-table td {
-    text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  table.data-table th,
+  table.data-table td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
   table.data-table th {
-    background: #f8fafc; font-weight: 600; color: var(--muted);
-    font-size: 11.5px; text-transform: uppercase; letter-spacing: .3px;
-    position: sticky; top: 0;
+    background: #f8fafc;
+    font-weight: 600;
+    color: var(--muted);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: .3px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
   }
-  table.data-table td.num, table.data-table th.num {
-    text-align: right; font-variant-numeric: tabular-nums;
+  table.data-table td.num,
+  table.data-table th.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
   }
   table.data-table tr:hover td { background: #fafbfc; }
+  table.data-table tr:last-child td { border-bottom: none; }
 
+  /* pill / tag */
   .age-pill {
-    display: inline-block; padding: 2px 8px; border-radius: 999px;
-    font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
   .age-pill.ok    { background: #ecfdf5; color: #047857; }
   .age-pill.warn  { background: #fef3c7; color: #92400e; }
   .age-pill.bad   { background: #fee2e2; color: #b91c1c; }
+  .age-pill.none  { background: #f1f5f9; color: #64748b; }
 
   .replace-tag {
-    display: inline-block; padding: 2px 8px; border-radius: 999px;
-    font-size: 11px; font-weight: 600;
-    background: #fee2e2; color: #b91c1c;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    background: #fee2e2;
+    color: #b91c1c;
   }
   .status-tag {
-    display: inline-block; padding: 2px 8px; border-radius: 999px;
-    font-size: 11px; font-weight: 600;
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
   }
   .status-tag.active   { background: #ecfdf5; color: #047857; }
   .status-tag.replaced { background: #f1f5f9; color: #475569; }
   .status-tag.returned { background: #fef3c7; color: #92400e; }
   .status-tag.lost     { background: #fee2e2; color: #b91c1c; }
 
-  .section-head {
-    display: flex; align-items: center; justify-content: space-between;
-    margin: 22px 0 10px 0;
+  .pay-tag {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
   }
-  .section-head h2 {
-    margin: 0; font-size: 16px; font-weight: 700;
-  }
-  .section-head .section-hint {
-    font-size: 12px; color: var(--muted);
-  }
-  .empty-row {
-    padding: 24px; text-align: center; color: var(--muted); font-size: 13px;
-  }
-  .nas-card {
-    background: linear-gradient(135deg, #eff6ff, #ffffff);
-    border: 1px dashed var(--border-strong); border-radius: 12px;
-    padding: 18px; display: flex; gap: 14px; align-items: center;
-  }
-  .nas-card .nas-icon { font-size: 32px; }
-  .nas-card .nas-text { flex: 1; }
-  .nas-card .nas-text h3 { margin: 0 0 4px 0; font-size: 14px; }
-  .nas-card .nas-text p  { margin: 0; color: var(--muted); font-size: 12.5px; }
+  .pay-tag.선불 { background: #dbeafe; color: #1d4ed8; }
+  .pay-tag.후불 { background: #fef3c7; color: #92400e; }
 
-  .scroll-x { overflow-x: auto; }
-  @media (max-width: 600px) {
-    .filter-bar .count-pill { margin-left: 0; width: 100%; text-align: center; }
-    .stat-value { font-size: 22px !important; }
-    .cat-card .cat-total { font-size: 18px; }
+  .kind-tag {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    background: #ede9fe;
+    color: #5b21b6;
+  }
+  .kind-tag.item { background: #fce7f3; color: #9d174d; }
+
+  .mini-cat-dist {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .mini-cat-dist .mini-pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    background: #f1f5f9;
+    color: #475569;
+    font-variant-numeric: tabular-nums;
+  }
+  .mini-cat-dist .mini-pill.IT { background: #dbeafe; color: #1d4ed8; }
+  .mini-cat-dist .mini-pill.출력 { background: #fef3c7; color: #92400e; }
+  .mini-cat-dist .mini-pill.위생 { background: #dcfce7; color: #15803d; }
+
+  .empty-row {
+    padding: 28px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .memo-cell {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-width: 480px;
+    font-size: 12.5px;
+    color: var(--text-soft);
+    line-height: 1.5;
+  }
+  .muted-cell { color: var(--muted); }
+
+  /* 모바일 */
+  @media (max-width: 768px) {
+    .page-head h1 { font-size: 18px; }
+    .rs-stats { grid-template-columns: repeat(2, 1fr); }
+    .rs-stats .stat-value { font-size: 18px; }
+    .filter-bar .count-pill {
+      margin-left: 0;
+      width: 100%;
+      text-align: center;
+    }
+    .scroll-x { max-height: none; }
+    .hide-mobile { display: none !important; }
+    .tab-btn { padding: 8px 10px; font-size: 12.5px; }
   }
 </style>
 </head>
 <body>
 <main class="container">
 
+  <!-- ===== 페이지 헤더 ===== -->
   <div class="page-head">
     <div>
       <h1>🏠 임대현황</h1>
-      <p class="muted" style="margin:2px 0 0 0;">
-        실시간 자산 가동률 · 노후도 · 카테고리별 분포 한눈에 보기
-      </p>
+      <p class="muted" style="margin:2px 0 0 0;">한별시스템 전체 임대 운영 한눈에</p>
     </div>
     <div class="page-head-actions">
       <button class="btn ghost small" id="btn-refresh" title="다시 불러오기">↻ 새로고침</button>
+      <button class="btn ghost small" id="btn-export" title="현재 탭을 CSV로 내보내기">📥 CSV 내보내기</button>
     </div>
   </div>
 
-  <!-- ===== 상단 통계 카드 ===== -->
-  <div class="stats" id="stat-cards" aria-live="polite">
+  <!-- ===== 상단 요약 카드 (6개) ===== -->
+  <div class="rs-stats" id="rs-stats" aria-live="polite">
     <div class="stat-card">
-      <div class="stat-label">전체 자산</div>
-      <div class="stat-value" id="stat-total">–</div>
-      <div class="stat-sub muted" id="stat-total-sub">로딩 중…</div>
+      <div class="stat-label">활성 거래처</div>
+      <div class="stat-value" id="stat-cust">–</div>
+      <div class="stat-sub" id="stat-cust-sub">로딩 중…</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">활성 자산</div>
-      <div class="stat-value primary" id="stat-active">–</div>
-      <div class="stat-sub muted" id="stat-active-sub">–</div>
+      <div class="stat-label">자산</div>
+      <div class="stat-value primary" id="stat-items">–</div>
+      <div class="stat-sub" id="stat-items-sub">–</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">미할당 자산</div>
-      <div class="stat-value warn" id="stat-idle">–</div>
-      <div class="stat-sub muted" id="stat-idle-sub">현재 거래처 미배정</div>
+      <div class="stat-label">월 임대료 합계</div>
+      <div class="stat-value" id="stat-fee">–<span class="unit">원</span></div>
+      <div class="stat-sub" id="stat-fee-sub">활성 배정 기준</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">평균 노후도</div>
       <div class="stat-value" id="stat-avgage">–<span class="unit">개월</span></div>
-      <div class="stat-sub muted" id="stat-avgage-sub">활성 자산 기준</div>
+      <div class="stat-sub" id="stat-avgage-sub">활성 자산 기준</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">5년↑ 자산</div>
       <div class="stat-value" id="stat-old5y" style="color:#b91c1c;">–</div>
-      <div class="stat-sub muted" id="stat-old5y-sub">교체 검토 대상</div>
+      <div class="stat-sub">교체 검토 대상</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">가동률</div>
       <div class="stat-value" id="stat-util" style="color:var(--success);">–<span class="unit">%</span></div>
-      <div class="stat-sub muted">활성 / 전체</div>
+      <div class="stat-sub">활성 / 전체</div>
     </div>
   </div>
 
-  <!-- ===== 카테고리별 분포 ===== -->
-  <div class="section-head">
-    <h2>📦 카테고리별 자산 분포</h2>
-    <span class="section-hint">IT · 출력 · 위생</span>
-  </div>
-  <div class="cat-grid" id="cat-grid">
-    <!-- JS 가 동적 생성 -->
+  <!-- ===== 카테고리 빠른 분포 ===== -->
+  <div class="rs-cat-row" id="rs-cat-row">
+    <span class="rs-cat-label">📦 카테고리:</span>
+    <!-- JS 가 cat-pill 동적 생성 -->
   </div>
 
-  <!-- ===== NAS 확장 대비 영역 ===== -->
-  <div class="section-head">
-    <h2>💾 NAS 확장 대비</h2>
-    <span class="section-hint">storage_gb 컬럼 기반</span>
-  </div>
-  <div id="nas-area" style="margin-bottom: 6px;">
-    <!-- JS 가 동적 생성 -->
+  <!-- ===== 탭 ===== -->
+  <div class="rs-tabs" role="tablist">
+    <button class="tab-btn active" data-tab="customers" role="tab">
+      🏢 거래처별<span class="tab-count" id="tc-customers">0</span>
+    </button>
+    <button class="tab-btn" data-tab="items" role="tab">
+      📦 자산별<span class="tab-count" id="tc-items">0</span>
+    </button>
+    <button class="tab-btn" data-tab="age" role="tab">
+      🕒 노후도 순<span class="tab-count" id="tc-age">0</span>
+    </button>
+    <button class="tab-btn" data-tab="memo" role="tab">
+      📝 메모/특이사항<span class="tab-count" id="tc-memo">0</span>
+    </button>
   </div>
 
-  <!-- ===== 노후도 Top 10 ===== -->
-  <div class="section-head">
-    <h2>🕒 노후도 Top 10 (교체 검토)</h2>
-    <span class="section-hint">age_months 내림차순</span>
-  </div>
-  <div class="card" style="padding: 4px;">
-    <div class="scroll-x">
-      <table class="data-table" id="age-top-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>카테고리</th>
-            <th>품목</th>
-            <th>브랜드 / 모델</th>
-            <th>시리얼</th>
-            <th class="num">노후도</th>
-            <th>도입일</th>
-            <th>상태</th>
-            <th>교체</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+  <!-- ===== 탭 패널 ===== -->
+
+  <!-- ▼ 거래처별 -->
+  <section class="tab-panel" data-tab="customers">
+    <div class="filter-bar">
+      <input type="search" id="cf-q" placeholder="🔍 회사명·주소·메모 검색" />
+      <select id="cf-pay">
+        <option value="">결제방식 (전체)</option>
+        <option value="선불">선불</option>
+        <option value="후불">후불</option>
+      </select>
+      <select id="cf-cat">
+        <option value="">보유 카테고리 (전체)</option>
+        <option value="IT">IT 보유</option>
+        <option value="출력">출력 보유</option>
+        <option value="위생">위생 보유</option>
+      </select>
+      <span class="count-pill" id="cf-count">0 건</span>
     </div>
-  </div>
-
-  <!-- ===== 미할당 자산 ===== -->
-  <div class="section-head">
-    <h2>🆓 미할당 자산</h2>
-    <span class="section-hint" id="idle-hint">활성이지만 거래처 미배정</span>
-  </div>
-  <div class="card" style="padding: 4px;">
-    <div class="scroll-x">
-      <table class="data-table" id="idle-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>카테고리</th>
-            <th>품목</th>
-            <th>브랜드 / 모델</th>
-            <th>시리얼</th>
-            <th class="num">노후도</th>
-            <th>도입일</th>
-            <th>상태</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div class="rs-table-wrap">
+      <div class="scroll-x">
+        <table class="data-table" id="cust-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>회사명</th>
+              <th class="num">자산수</th>
+              <th>카테고리</th>
+              <th class="num">월 임대료</th>
+              <th class="hide-mobile">주소</th>
+              <th>결제</th>
+              <th class="num hide-mobile">청구일</th>
+              <th class="num hide-mobile">보증금</th>
+              <th class="num">최대 노후도</th>
+              <th class="hide-mobile">메모</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <!-- ===== 전체 자산 표 (검색·필터) ===== -->
-  <div class="section-head">
-    <h2>🗂 전체 자산 (검색·필터)</h2>
-    <span class="section-hint">subtype / status / 키워드</span>
-  </div>
-  <div class="filter-bar">
-    <input type="search" id="f-q" placeholder="🔍 모델·시리얼·브랜드 검색" />
-    <select id="f-cat">
-      <option value="">전체 카테고리</option>
-    </select>
-    <select id="f-sub">
-      <option value="">전체 품목</option>
-    </select>
-    <select id="f-status">
-      <option value="">전체 상태</option>
-      <option value="active">active</option>
-      <option value="replaced">replaced</option>
-      <option value="returned">returned</option>
-      <option value="lost">lost</option>
-    </select>
-    <select id="f-assign">
-      <option value="">전체 배정</option>
-      <option value="assigned">배정됨</option>
-      <option value="idle">미배정</option>
-    </select>
-    <span class="count-pill" id="f-count">0 건</span>
-  </div>
-  <div class="card" style="padding: 4px;">
-    <div class="scroll-x">
-      <table class="data-table" id="all-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>카테고리</th>
-            <th>품목</th>
-            <th>브랜드 / 모델</th>
-            <th>시리얼</th>
-            <th class="num">노후도</th>
-            <th>도입일</th>
-            <th>상태</th>
-            <th>거래처</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+  <!-- ▼ 자산별 -->
+  <section class="tab-panel" data-tab="items" style="display:none;">
+    <div class="filter-bar">
+      <input type="search" id="if-q" placeholder="🔍 모델·시리얼·거래처 검색" />
+      <select id="if-cat">
+        <option value="">전체 카테고리</option>
+      </select>
+      <select id="if-sub">
+        <option value="">전체 품목</option>
+      </select>
+      <select id="if-status">
+        <option value="">전체 상태</option>
+        <option value="active">active</option>
+        <option value="replaced">replaced</option>
+        <option value="returned">returned</option>
+        <option value="lost">lost</option>
+      </select>
+      <select id="if-assign">
+        <option value="">배정 (전체)</option>
+        <option value="assigned">배정됨</option>
+        <option value="idle">미배정</option>
+      </select>
+      <span class="count-pill" id="if-count">0 건</span>
     </div>
-  </div>
+    <div class="rs-table-wrap">
+      <div class="scroll-x">
+        <table class="data-table" id="item-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>카테고리</th>
+              <th>품목</th>
+              <th>브랜드/모델</th>
+              <th class="hide-mobile">시리얼</th>
+              <th>거래처</th>
+              <th class="num hide-mobile">도입일</th>
+              <th class="num">노후도</th>
+              <th class="num">월 임대료</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▼ 노후도 순 -->
+  <section class="tab-panel" data-tab="age" style="display:none;">
+    <div class="filter-bar">
+      <input type="search" id="af-q" placeholder="🔍 모델·시리얼·거래처 검색" />
+      <select id="af-cat">
+        <option value="">전체 카테고리</option>
+      </select>
+      <select id="af-band">
+        <option value="">노후도 (전체)</option>
+        <option value="bad">60개월↑ (교체)</option>
+        <option value="warn">36~59개월</option>
+        <option value="ok">~35개월</option>
+        <option value="none">미입력</option>
+      </select>
+      <span class="count-pill" id="af-count">0 건</span>
+    </div>
+    <div class="rs-table-wrap">
+      <div class="scroll-x">
+        <table class="data-table" id="age-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>카테고리</th>
+              <th>품목</th>
+              <th>브랜드/모델</th>
+              <th class="hide-mobile">시리얼</th>
+              <th>거래처</th>
+              <th class="num hide-mobile">도입일</th>
+              <th class="num">노후도</th>
+              <th>상태</th>
+              <th>교체</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ▼ 메모/특이사항 -->
+  <section class="tab-panel" data-tab="memo" style="display:none;">
+    <div class="filter-bar">
+      <input type="search" id="mf-q" placeholder="🔍 대상·메모 검색" />
+      <select id="mf-kind">
+        <option value="">종류 (전체)</option>
+        <option value="customer">거래처</option>
+        <option value="item">자산</option>
+      </select>
+      <span class="count-pill" id="mf-count">0 건</span>
+    </div>
+    <div class="rs-table-wrap">
+      <div class="scroll-x">
+        <table class="data-table" id="memo-table">
+          <thead>
+            <tr>
+              <th style="width:80px;">종류</th>
+              <th style="width:200px;">대상</th>
+              <th>메모</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
   <p class="muted-small" style="margin-top:14px; text-align:center;">
-    데이터 소스: Supabase <code>rental_items</code> + <code>rental_assignments</code> + <code>rental_customers</code>
+    데이터 소스: Supabase <code>rental_customers</code> + <code>rental_items</code> + <code>rental_assignments</code>
+    · 마지막 갱신: <span id="last-updated">–</span>
   </p>
 
 </main>
-<script src="index.js?v=20260513a"></script>
+<script src="index.js?v=20260513c"></script>
 </body>
 </html>
