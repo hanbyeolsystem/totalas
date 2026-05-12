@@ -118,7 +118,7 @@ async function loadAll() {
         rental_assignments(
           id, item_id, start_date, end_date, monthly_fee,
           bw_free, co_free, bw_rate, co_rate,
-          rental_items(id, category, subtype, brand, model, serial, install_date, status, age_months, storage_gb)
+          rental_items(id, category, subtype, brand, model, serial, install_date, status, storage_gb)
         )
       `)
       .eq('active', true)
