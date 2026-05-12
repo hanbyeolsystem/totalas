@@ -461,17 +461,160 @@ function renderTabInfo(body, id, c) {
 }
 
 // ============================================================
-// [계약서] 탭
+// [계약서] 탭 — 모달로 띄움 + 파일 보관함
 // ============================================================
 function renderTabContracts(body, id) {
   body.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
       <h4 style="margin:0;">📋 임대 계약서</h4>
-      <a class="btn small primary" href="contracts.html?customer=${escapeHtml(id)}">+ 신규 계약서</a>
+      <button class="btn small primary" id="btn-new-contract">+ 신규 계약서</button>
     </div>
-    <div id="cust-contracts-${escapeHtml(id)}"></div>
+    <div id="cust-contracts-${escapeHtml(id)}" style="margin-bottom:18px;"></div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+      <h4 style="margin:0;">📎 계약서 파일 보관함</h4>
+      <label class="btn small ghost" style="cursor:pointer;">
+        + 파일 업로드
+        <input type="file" id="contract-file-input" multiple accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.hwp" hidden>
+      </label>
+    </div>
+    <div id="cust-contract-files-${escapeHtml(id)}"></div>
   `;
+  document.getElementById('btn-new-contract').addEventListener('click', () => openContractModal(id, null));
+  document.getElementById('contract-file-input').addEventListener('change', e => onContractFileUpload(id, e.target.files));
   renderCustomerContracts(id);
+  renderCustomerContractFiles(id);
+}
+
+/** 계약서 작성/보기를 iframe 모달로 띄움. */
+function openContractModal(customerId, contractId) {
+  const url = contractId
+    ? `contracts.html?id=${encodeURIComponent(contractId)}&embed=1`
+    : `contracts.html?customer=${encodeURIComponent(customerId)}&embed=1`;
+  const html = `
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border);">
+      <h3 style="margin:0; font-size:15px;">📋 계약서 ${contractId ? '편집' : '신규 작성'}</h3>
+      <button class="btn ghost small" data-close>× 닫기</button>
+    </div>
+    <iframe src="${url}" style="width:100%; height:75vh; border:none; display:block;" id="contract-iframe"></iframe>
+    <div class="muted-small" style="padding:6px 12px; border-top:1px solid var(--border); background:#f8fafc;">
+      💡 계약서 작성 후 우상단 [💾 저장] 클릭, 작업이 끝나면 [× 닫기] 로 돌아가세요.
+    </div>
+  `;
+  const box = $('#modal-box');
+  box.innerHTML = html;
+  box.style.padding = '0';
+  box.style.maxWidth = '95vw';
+  box.style.width    = '1200px';
+  box.classList.add('wide');
+  $('#modal-backdrop').classList.remove('hidden');
+  box.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', async () => {
+    closeModal();
+    box.style.padding = ''; box.style.maxWidth = ''; box.style.width = '';
+    // 닫을 때 계약서 다시 로드해서 목록 갱신
+    try { await store.load(); } catch (_) {}
+    renderCustomerContracts(customerId);
+  }));
+}
+
+// ── 파일 보관함 (rental_archive category='contract') ──
+function renderCustomerContractFiles(customerId) {
+  const wrap = document.getElementById(`cust-contract-files-${customerId}`);
+  if (!wrap) return;
+  const files = Object.values(store.data.archive || {})
+    .filter(a => a.customer_id === customerId && a.category === 'contract')
+    .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  if (!files.length) {
+    wrap.innerHTML = `<div class="muted" style="padding:14px; text-align:center; border:1px dashed var(--border); border-radius:6px; font-size:13px;">스캔본·PDF·이미지 등 계약 관련 파일을 업로드하세요.</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <ul style="list-style:none; margin:0; padding:0;">
+      ${files.map(f => `
+        <li style="border:1px solid var(--border); border-radius:6px; padding:8px 12px; margin-bottom:6px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <span style="font-size:18px;">${guessFileIcon(f.filename || '')}</span>
+          <div style="flex:1; min-width:200px;">
+            <div style="font-weight:600;">${escapeHtml(f.filename || '파일')}</div>
+            <div class="muted-small">${fmtFileSize(f.size_bytes)} · 업로드 ${fmtDate(f.created_at)} ${f.description ? '· ' + escapeHtml(f.description) : ''}</div>
+          </div>
+          <button class="btn small ghost"        data-download-file="${f.id}">⬇ 다운로드</button>
+          <button class="btn small ghost danger" data-delete-file="${f.id}">🗑</button>
+        </li>`).join('')}
+    </ul>
+  `;
+  wrap.querySelectorAll('[data-download-file]').forEach(b =>
+    b.addEventListener('click', () => onDownloadContractFile(b.dataset.downloadFile)));
+  wrap.querySelectorAll('[data-delete-file]').forEach(b =>
+    b.addEventListener('click', () => onDeleteContractFile(customerId, b.dataset.deleteFile)));
+}
+
+async function onContractFileUpload(customerId, fileList) {
+  if (!fileList || !fileList.length) return;
+  try {
+    showLoading(`업로드 중 (0/${fileList.length})…`);
+    for (let i = 0; i < fileList.length; i++) {
+      const f = fileList[i];
+      showLoading(`업로드 중 (${i + 1}/${fileList.length}) — ${f.name}`);
+      const id = 'ar_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const path = `archive/${customerId}/${id}/${f.name}`;
+      await store.uploadFile(path, f, { contentType: f.type });
+      await store.upsertArchive({
+        id,
+        customer_id: customerId,
+        category: 'contract',
+        filename: f.name,
+        file_path: path,
+        mime_type: f.type || '',
+        size_bytes: f.size,
+        description: '',
+      });
+    }
+    renderCustomerContractFiles(customerId);
+  } catch (e) {
+    console.error('파일 업로드 실패:', e);
+    alert('업로드 실패: ' + (e.message || e));
+  } finally { hideLoading(); }
+}
+
+async function onDownloadContractFile(archiveId) {
+  const a = store.data.archive[archiveId];
+  if (!a || !a.file_path) return;
+  try {
+    const blob = await store.downloadFile(a.file_path);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = a.filename || 'file';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) { alert('다운로드 실패: ' + (e.message || e)); }
+}
+
+async function onDeleteContractFile(customerId, archiveId) {
+  const a = store.data.archive[archiveId];
+  if (!a) return;
+  if (!confirm(`${a.filename} 파일을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+  try {
+    await store.deleteArchive(archiveId);
+    renderCustomerContractFiles(customerId);
+  } catch (e) { alert('삭제 실패: ' + (e.message || e)); }
+}
+
+function guessFileIcon(filename) {
+  const f = filename.toLowerCase();
+  if (f.endsWith('.pdf')) return '📄';
+  if (/\.(jpg|jpeg|png|gif|webp)$/.test(f)) return '🖼️';
+  if (/\.(doc|docx)$/.test(f)) return '📝';
+  if (f.endsWith('.hwp')) return '📃';
+  return '📎';
+}
+
+function fmtFileSize(n) {
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(i === 0 ? 0 : 1) + ' ' + u[i];
 }
 
 // ============================================================
@@ -932,11 +1075,13 @@ function renderCustomerContracts(customerId) {
                 ${ct.contract_months ? ' · ' + ct.contract_months + '개월' : ''}
               </div>
             </div>
-            <a class="btn small ghost" href="contracts.html?id=${escapeHtml(ct.id)}">열기</a>
+            <button class="btn small ghost" data-open-contract="${escapeHtml(ct.id)}">열기</button>
           </li>`;
       }).join('')}
     </ul>
   `;
+  wrap.querySelectorAll('[data-open-contract]').forEach(b =>
+    b.addEventListener('click', () => openContractModal(customerId, b.dataset.openContract)));
 }
 
 async function loadAndRenderAttachments(customerId) {

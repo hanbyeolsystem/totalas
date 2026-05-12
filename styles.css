@@ -54,6 +54,35 @@ body[data-embed="1"] .main-area {
 body[data-embed="1"] .container {
   padding-top: 12px !important;
 }
+
+/* embed 모드의 contracts.html — 좌측 계약서 목록 숨김, 편집 영역만 풀폭
+   페이지 헤더는 액션 버튼이 필요해서 보이되, 좌측 타이틀만 숨김 */
+body[data-embed="1"] .contract-list-wrap {
+  display: none !important;
+}
+body[data-embed="1"] .page-head > div:first-child {
+  display: none !important;
+}
+body[data-embed="1"] .page-head {
+  padding: 6px 12px !important;
+  margin-bottom: 8px !important;
+}
+body[data-embed="1"] .contract-layout {
+  grid-template-columns: 1fr !important;
+  display: block !important;
+}
+body[data-embed="1"] .contract-edit-wrap {
+  width: 100% !important;
+  max-width: none !important;
+}
+body[data-embed="1"] .ct-status-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fff;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
 .sidebar {
   width: 224px;
   background: #fff;
