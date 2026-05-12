@@ -365,26 +365,32 @@
         cms: c.cms || {},
         source_file: c.source_file || '',
       };
-      // cms 컬럼이 없는 구버전 DB 호환 — 실패 시 cms 제외 재시도
-      let { error } = await supa.from('rental_contracts').upsert(row);
-      if (error && /cms/.test(String(error.message || ''))) {
-        console.warn('[contracts] cms 컬럼 누락 — 07_alter_contracts_cms.sql 적용 필요');
-        const { cms, ...withoutCms } = row;
-        ({ error } = await supa.from('rental_contracts').upsert(withoutCms));
-      }
-      // terms_checked / extras_checked 가 아직 boolean[] 인 DB 호환
-      // [{text, checked}] 객체 배열 → boolean[] 로 정규화하여 재시도
-      if (error && /type boolean/.test(String(error.message || ''))) {
-        console.warn('[contracts] terms_checked/extras_checked 가 아직 boolean[] — 08_alter_contracts_terms_jsonb.sql 적용 필요');
-        const toBools = arr => Array.isArray(arr)
-          ? arr.map(x => (x && typeof x === 'object') ? (x.checked !== false) : (x !== false))
-          : [];
-        const legacyRow = {
-          ...row,
-          terms_checked: toBools(row.terms_checked),
-          extras_checked: toBools(row.extras_checked),
-        };
-        ({ error } = await supa.from('rental_contracts').upsert(legacyRow));
+      // 구버전 DB 호환: cms 컬럼 없음 / terms·extras 가 아직 boolean[]
+      // 각 오류 감지마다 row 를 누적 변형하여 마지막 한 번에 retry
+      const toBools = arr => Array.isArray(arr)
+        ? arr.map(x => (x && typeof x === 'object') ? (x.checked !== false) : (x !== false))
+        : [];
+      let working = { ...row };
+      let attempts = 0;
+      let error;
+      while (attempts < 3) {
+        attempts++;
+        ({ error } = await supa.from('rental_contracts').upsert(working));
+        if (!error) break;
+        const msg = String(error.message || '');
+        let mutated = false;
+        if (/cms/.test(msg) && 'cms' in working) {
+          console.warn('[contracts] cms 컬럼 누락 — 07_alter_contracts_cms.sql 적용 필요');
+          delete working.cms;
+          mutated = true;
+        }
+        if (/type boolean/.test(msg)) {
+          console.warn('[contracts] terms_checked/extras_checked 가 아직 boolean[] — 08_alter_contracts_terms_jsonb.sql 적용 필요');
+          working.terms_checked = toBools(working.terms_checked);
+          working.extras_checked = toBools(working.extras_checked);
+          mutated = true;
+        }
+        if (!mutated) break;  // 알 수 없는 오류
       }
       if (error) throw error;
       this.data.contracts[c.id] = { ...(this.data.contracts[c.id] || {}), ...row };
