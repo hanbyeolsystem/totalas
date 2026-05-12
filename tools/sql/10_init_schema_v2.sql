@@ -1,8 +1,12 @@
 -- ============================================================
--- 10_init_schema_v2.sql  (2026-05-13)
--- 한별 임대 v2 스키마 — 4개 모듈(현황/거래처/카운터/청구) 공유
--- 모든 테이블 idempotent (IF NOT EXISTS / DROP-CREATE policy).
+-- 10_init_schema_v2.sql  (2026-05-13, rev2)
+-- 한별 임대 v2 스키마 — 4개 모듈(현황/거래처/카운터/청구) 공유.
+-- rev2: 완전 재구축 위해 시작 시 기존 rental_* 모두 DROP.
 -- ============================================================
+
+-- ===== 0. 기존 객체 정리 (완전 초기화) =====
+DROP TABLE IF EXISTS rental_supplies, rental_billings, rental_counters,
+                     rental_assignments, rental_items, rental_customers CASCADE;
 
 -- ===== 1. rental_customers =====
 CREATE TABLE IF NOT EXISTS rental_customers (

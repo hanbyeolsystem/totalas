@@ -3,8 +3,7 @@
 -- customers=189 items=286 assignments=286
 -- ============================================================
 
--- 기존 데이터 비우기 (안전: rental_customers 만 CASCADE → 나머지 모두 cascade)
-TRUNCATE rental_billings, rental_supplies, rental_counters, rental_assignments, rental_items, rental_customers RESTART IDENTITY CASCADE;
+-- (스키마 10 에서 이미 DROP+CREATE 했으므로 TRUNCATE 불필요)
 
 -- ===== rental_customers =====
 INSERT INTO rental_customers (id, company, address, invoice_day, payment_type, deposit, notes) VALUES ('c_0001', '수성2,3가 새마을금고', '수성구 수성동3가 289', '1일', '선불', 0, '(본점:1/지점:1)');
