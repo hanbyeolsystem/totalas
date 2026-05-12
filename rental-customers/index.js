@@ -106,6 +106,13 @@ function bindUI() {
   backdrop.addEventListener('click', (e) => {
     if (e.target.id === 'rc-modal') closeModal();
   });
+
+  // ESC 키로 모달 닫기
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('rc-modal').classList.contains('show')) {
+      closeModal();
+    }
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -363,14 +370,17 @@ function renderDetail() {
 
   const assetCard = `
     <div class="card">
-      <h3>📦 보유 자산 <span class="muted-small" style="font-weight:400;">${sorted.length}건</span></h3>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+        <h3 style="margin:0;">📦 보유 자산 <span class="muted-small" style="font-weight:400;">${sorted.length}건</span></h3>
+        <button class="btn small primary" id="btn-asset-add">+ 자산 추가</button>
+      </div>
       ${sorted.length ? `
         <div style="overflow-x:auto;">
           <table class="rc-asset-table">
             <thead>
               <tr>
                 <th>분류</th><th>품목</th><th>모델</th><th>시리얼</th>
-                <th>설치일</th><th>월 임대료</th><th>상태</th>
+                <th>설치일</th><th>월 임대료</th><th>상태</th><th class="act">관리</th>
               </tr>
             </thead>
             <tbody>
@@ -380,11 +390,15 @@ function renderDetail() {
                 return `<tr>
                   <td><span class="rc-cat-pill rc-cat-${cat}">${cat}</span></td>
                   <td>${escapeHtml(it.subtype || '-')}</td>
-                  <td>${escapeHtml((it.brand || '') + ' ' + (it.model || ''))}</td>
+                  <td>${escapeHtml(((it.brand || '') + ' ' + (it.model || '')).trim() || '-')}</td>
                   <td class="muted-small">${escapeHtml(it.serial || '-')}</td>
                   <td class="muted-small">${escapeHtml((it.install_date || '').slice(0, 10))}</td>
                   <td style="text-align:right;">${a.monthly_fee ? Number(a.monthly_fee).toLocaleString() : '-'}</td>
                   <td>${escapeHtml(it.status || '-')}</td>
+                  <td class="act">
+                    <button class="rc-icon-btn" title="수정" data-act="edit" data-aid="${escapeAttr(a.id)}">✏</button>
+                    <button class="rc-icon-btn danger" title="삭제" data-act="del" data-aid="${escapeAttr(a.id)}">🗑</button>
+                  </td>
                 </tr>`;
               }).join('')}
             </tbody>
@@ -423,6 +437,19 @@ function renderDetail() {
 
   document.getElementById('btn-edit').addEventListener('click', () => openForm(c));
   document.getElementById('btn-delete').addEventListener('click', () => deleteCustomer(c));
+
+  const addBtn = document.getElementById('btn-asset-add');
+  if (addBtn) addBtn.addEventListener('click', () => openAssetForm(c, null));
+
+  detail.querySelectorAll('.rc-asset-table .rc-icon-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const aid = btn.dataset.aid;
+      const a = c._assignments.find(x => x.id === aid);
+      if (!a) return;
+      if (btn.dataset.act === 'edit') openAssetForm(c, a);
+      else if (btn.dataset.act === 'del') deleteAsset(c, a);
+    });
+  });
 }
 
 function buildInsights(c) {
@@ -606,6 +633,219 @@ async function deleteCustomer(c) {
 
 function closeModal() {
   document.getElementById('rc-modal').classList.remove('show');
+  document.getElementById('rc-modal-body').classList.remove('rc-asset-modal-box');
+}
+
+// ─────────────────────────────────────────────────────────────
+// CRUD: 자산 (rental_items + rental_assignments)
+// ─────────────────────────────────────────────────────────────
+
+// 카테고리 → 품목(subtype) 옵션
+const SUBTYPE_OPTIONS = {
+  'IT':   ['PC', '노트북', 'monitor', 'NAS'],
+  '출력': ['잉크젯', '레이저', '복합기'],
+  '위생': ['웰리스'],
+};
+const PRINT_SUBTYPES = new Set(['잉크젯','레이저','복합기','inkjet','laser','mfp']);
+
+function fillSubtypeOptions(catSel, subSel, current) {
+  const cat = catSel.value;
+  const opts = SUBTYPE_OPTIONS[cat] || [];
+  subSel.innerHTML = opts.length
+    ? ['<option value="">선택</option>', ...opts.map(o => `<option value="${escapeAttr(o)}">${escapeHtml(o)}</option>`)].join('')
+    : '<option value="">먼저 카테고리 선택</option>';
+  if (current && opts.includes(current)) subSel.value = current;
+}
+
+function applyAssetVisibility(form) {
+  const sub = form.subtype.value || '';
+  const isPrint = PRINT_SUBTYPES.has(sub);
+  const isNas = /nas/i.test(sub);
+  form.querySelectorAll('[data-show]').forEach(row => {
+    const tag = row.dataset.show;
+    let show = false;
+    if (tag === 'print') show = isPrint;
+    else if (tag === 'nas') show = isNas;
+    row.classList.toggle('hidden', !show);
+  });
+}
+
+function openAssetForm(customer, existing) {
+  const tpl = document.getElementById('tpl-asset-form');
+  const body = document.getElementById('rc-modal-body');
+  body.innerHTML = '';
+  body.classList.add('rc-asset-modal-box');
+  body.appendChild(tpl.content.cloneNode(true));
+
+  const f = body.querySelector('#asset-form');
+  const catSel = f.category;
+  const subSel = f.subtype;
+
+  // 카테고리 변경 → 품목 옵션 갱신
+  catSel.addEventListener('change', () => {
+    fillSubtypeOptions(catSel, subSel, null);
+    applyAssetVisibility(f);
+  });
+  subSel.addEventListener('change', () => applyAssetVisibility(f));
+
+  if (existing) {
+    body.querySelector('#asset-form-title').textContent =
+      `자산 수정 — ${(existing.rental_items.model || existing.rental_items.subtype || '')}`;
+    const it = existing.rental_items || {};
+    const initialCat = it.category || categoryOf(it.subtype);
+    catSel.value = SUBTYPE_OPTIONS[initialCat] ? initialCat : '';
+    fillSubtypeOptions(catSel, subSel, it.subtype || '');
+    if (it.subtype) subSel.value = it.subtype;
+    f.brand.value = it.brand || '';
+    f.model.value = it.model || '';
+    f.serial.value = it.serial || '';
+    f.install_date.value = (it.install_date || '').slice(0, 10);
+    f.status.value = it.status || 'active';
+    f.storage_gb.value = it.storage_gb != null ? it.storage_gb : '';
+    f.notes.value = it.notes || '';
+    f.monthly_fee.value = existing.monthly_fee != null ? existing.monthly_fee : '';
+    f.bw_free.value = existing.bw_free != null ? existing.bw_free : '';
+    f.co_free.value = existing.co_free != null ? existing.co_free : '';
+    f.bw_rate.value = existing.bw_rate != null ? existing.bw_rate : '';
+    f.co_rate.value = existing.co_rate != null ? existing.co_rate : '';
+    f.start_date.value = (existing.start_date || '').slice(0, 10);
+  } else {
+    f.status.value = 'active';
+  }
+  applyAssetVisibility(f);
+
+  body.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeModal));
+
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = body.querySelector('#asset-form-error');
+    const btn = body.querySelector('#asset-form-submit');
+    errEl.textContent = '';
+    btn.disabled = true;
+    btn.textContent = '저장 중…';
+
+    try {
+      const category = catSel.value;
+      const subtype = subSel.value;
+      const model = f.model.value.trim();
+      if (!category) throw new Error('카테고리를 선택하세요.');
+      if (!subtype) throw new Error('품목을 선택하세요.');
+      if (!model) throw new Error('모델은 필수입니다.');
+
+      const itemPayload = {
+        category,
+        subtype,
+        brand:   f.brand.value.trim() || null,
+        model,
+        serial:  f.serial.value.trim() || null,
+        install_date: f.install_date.value || null,
+        status:  f.status.value || 'active',
+        storage_gb: f.storage_gb.value ? Number(f.storage_gb.value) : null,
+        notes:   f.notes.value.trim() || null,
+      };
+      const assignPayload = {
+        start_date:   f.start_date.value || itemPayload.install_date || null,
+        monthly_fee:  f.monthly_fee.value ? Number(f.monthly_fee.value) : null,
+        bw_free:      f.bw_free.value ? Number(f.bw_free.value) : null,
+        co_free:      f.co_free.value ? Number(f.co_free.value) : null,
+        bw_rate:      f.bw_rate.value ? Number(f.bw_rate.value) : null,
+        co_rate:      f.co_rate.value ? Number(f.co_rate.value) : null,
+      };
+
+      const supa = window.totalasAuth;
+      if (existing) {
+        // 수정: items + assignments 동시 업데이트
+        const { error: itErr } = await supa
+          .from('rental_items')
+          .update(itemPayload)
+          .eq('id', existing.item_id);
+        if (itErr) throw itErr;
+        const { error: asErr } = await supa
+          .from('rental_assignments')
+          .update(assignPayload)
+          .eq('id', existing.id);
+        if (asErr) throw asErr;
+      } else {
+        // 신규: items 먼저, 그다음 assignment
+        const itemId = `it_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,5)}`;
+        const { error: itErr } = await supa
+          .from('rental_items')
+          .insert({ id: itemId, ...itemPayload });
+        if (itErr) throw itErr;
+
+        const aid = `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,5)}`;
+        const { error: asErr } = await supa
+          .from('rental_assignments')
+          .insert({
+            id: aid,
+            item_id: itemId,
+            customer_id: customer.id,
+            ...assignPayload,
+          });
+        if (asErr) {
+          // 롤백 (best-effort)
+          await supa.from('rental_items').delete().eq('id', itemId);
+          throw asErr;
+        }
+      }
+      closeModal();
+      toast(existing ? '자산이 수정되었습니다.' : '자산이 추가되었습니다.', 'ok');
+      await loadAll();
+      renderDetail();
+    } catch (err) {
+      console.error(err);
+      errEl.textContent = err.message || String(err);
+      btn.disabled = false;
+      btn.textContent = '저장';
+    }
+  });
+
+  document.getElementById('rc-modal').classList.add('show');
+}
+
+async function deleteAsset(customer, assignment) {
+  const it = assignment.rental_items || {};
+  const label = (it.model || it.subtype || '자산');
+  if (!confirm(`'${label}'을 이 거래처에서 삭제하시겠습니까?\n자산도 함께 삭제됩니다.`)) return;
+  try {
+    const supa = window.totalasAuth;
+    // 1) assignment 삭제
+    const { error: aErr } = await supa
+      .from('rental_assignments')
+      .delete()
+      .eq('id', assignment.id);
+    if (aErr) throw aErr;
+    // 2) item 삭제 (단순화: 함께 삭제)
+    if (assignment.item_id) {
+      const { error: iErr } = await supa
+        .from('rental_items')
+        .delete()
+        .eq('id', assignment.item_id);
+      // item 삭제 실패는 무시하지 않되 토스트만 — assignment는 이미 삭제됨
+      if (iErr) console.warn('item 삭제 경고:', iErr.message);
+    }
+    toast('자산이 삭제되었습니다.', 'ok');
+    await loadAll();
+    renderDetail();
+  } catch (err) {
+    console.error(err);
+    toast('삭제 실패: ' + (err.message || err), 'err');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// 토스트
+// ─────────────────────────────────────────────────────────────
+let _toastTimer = null;
+function toast(msg, kind) {
+  const el = document.getElementById('rc-toast');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'rc-toast show ' + (kind || '');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+  }, 2400);
 }
 
 // ─────────────────────────────────────────────────────────────
