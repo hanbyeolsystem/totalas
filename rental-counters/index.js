@@ -35,10 +35,12 @@ const state = {
   customers: [],
 };
 
-document.addEventListener('totalas:ready', init);
-// auth가 없는 환경에서도 단독 동작 (개발 편의)
-if (!document.documentElement.dataset.authed) {
-  setTimeout(() => { if (!state.items.length) init(); }, 800);
+if (window.totalasAuth) {
+  init();
+} else {
+  document.addEventListener('totalas:ready', init, { once: true });
+  // 안전망
+  setTimeout(() => { if (!state.items.length) init(); }, 2000);
 }
 
 async function init() {

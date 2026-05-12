@@ -75,10 +75,17 @@ function asScheduleOf(subtype) {
 // ─────────────────────────────────────────────────────────────
 // 부팅
 // ─────────────────────────────────────────────────────────────
-document.addEventListener('totalas:ready', async () => {
+async function boot() {
   bindUI();
   await loadAll();
-});
+}
+if (window.totalasAuth) {
+  boot();
+} else {
+  document.addEventListener('totalas:ready', boot, { once: true });
+  // 안전망: 2초 안에도 미준비면 그대로 부팅 시도 (loadAll 내부에서 에러 표시)
+  setTimeout(() => { if (!STATE.customers.length) boot(); }, 2000);
+}
 
 function bindUI() {
   document.getElementById('rc-search').addEventListener('input', (e) => {
