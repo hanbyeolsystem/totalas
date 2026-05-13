@@ -95,14 +95,20 @@
     color: var(--muted);
     margin-top: 2px;
   }
-  .prices-viewer iframe {
+  #viewer-slot {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 600px;
+  }
+  #viewer-slot iframe {
     width: 100%;
     flex: 1;
     border: 0;
     min-height: 600px;
     background: #fff;
   }
-  .prices-empty {
+  #viewer-slot .prices-empty {
     flex: 1;
     display: flex;
     align-items: center;
@@ -119,7 +125,7 @@
       min-height: auto;
     }
     .prices-list { max-height: none; }
-    .prices-viewer iframe { min-height: 70vh; }
+    #viewer-slot, #viewer-slot iframe { min-height: 70vh; }
   }
 </style>
 </head>
@@ -144,7 +150,7 @@
         </div>
         <a id="open-new" class="btn ghost small" target="_blank" rel="noopener" style="display:none;">↗ 새 창</a>
       </div>
-      <div id="viewer-slot" class="prices-empty">단가표를 선택하면 여기에 표시됩니다.</div>
+      <div id="viewer-slot"><div class="prices-empty">단가표를 선택하면 여기에 표시됩니다.</div></div>
     </section>
   </div>
 </main>
@@ -221,8 +227,8 @@ function select(i) {
   const isPdf  = /\.pdf$/i.test(it.file);
 
   if (isLocal && !isPdf) {
-    slotEl.outerHTML = `
-      <div id="viewer-slot" class="prices-empty">
+    slotEl.innerHTML = `
+      <div class="prices-empty">
         로컬 환경에서는 Office 뷰어가 동작하지 않습니다.<br>
         <a href="${absoluteFileUrl(it.file)}" target="_blank" style="color:var(--primary);text-decoration:underline;">
           파일 직접 열기
@@ -230,7 +236,7 @@ function select(i) {
         — GitHub Pages 라이브에서는 정상 동작합니다.
       </div>`;
   } else {
-    slotEl.outerHTML = `<iframe id="viewer-slot" src="${viewerUrl(it.file)}" title="${it.label}"></iframe>`;
+    slotEl.innerHTML = `<iframe src="${viewerUrl(it.file)}" title="${it.label}"></iframe>`;
   }
 
   openNew.href = absoluteFileUrl(it.file);
