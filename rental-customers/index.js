@@ -551,7 +551,8 @@ function renderDetail() {
     </div>
   `;
 
-  detail.innerHTML = infoCard + insightCard + assetCard + asCard;
+  // 순서: 기본정보 → 보유자산 → AS 주기 → (hook 으로 계약서 카드 삽입) → Cross-sell 인사이트
+  detail.innerHTML = infoCard + assetCard + asCard + insightCard;
 
   document.getElementById('btn-edit').addEventListener('click', () => openForm(c));
   document.getElementById('btn-delete').addEventListener('click', () => deleteCustomer(c));
@@ -2479,10 +2480,17 @@ renderDetail = function () {
   const c = STATE.customers.find(x => x.id === STATE.selectedId);
   if (!c) return;
 
-  // 계약서 카드를 우측 상세 패널 끝에 삽입
+  // 계약서 카드: Cross-sell 인사이트 카드 바로 앞에 삽입
+  // (Cross-sell 이 항상 맨 마지막에 보이도록 사용자 요청 반영)
   const detail = document.getElementById('rc-detail');
   const ctCardHTML = renderContractCard(c);
-  detail.insertAdjacentHTML('beforeend', ctCardHTML);
+  const cards = detail.querySelectorAll('.card');
+  const lastCard = cards[cards.length - 1];  // Cross-sell 카드 (renderDetail 마지막)
+  if (lastCard && /Cross-sell/i.test(lastCard.textContent || '')) {
+    lastCard.insertAdjacentHTML('beforebegin', ctCardHTML);
+  } else {
+    detail.insertAdjacentHTML('beforeend', ctCardHTML);
+  }
 
   // 이벤트 바인딩
   const newBtn = document.getElementById('btn-ct-new');
