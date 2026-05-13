@@ -5,20 +5,23 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>가격표 — 한별시스템</title>
 <script>
-  // standalone URL 진입 시 → asms.html shell 안으로 redirect.
-  // shell 의 햄버거 / 사이드바 / 인증을 그대로 사용. ?standalone=1 붙이면 우회.
+  // standalone URL 진입 시 → asms.html shell 안 iframe 으로 redirect.
+  // shell 의 햄버거 / 사이드바 / 인증을 그대로 사용. ?standalone=1 우회.
   if (window === window.top && !new URLSearchParams(location.search).has('standalone')) {
     location.replace('../asms.html#prices/index.html');
   }
 </script>
 <link rel="stylesheet" href="../styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
 <style>
   .prices-layout {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 300px 1fr;
     gap: 14px;
     margin-top: 14px;
-    min-height: calc(100vh - 180px);
+    min-height: calc(100vh - 200px);
   }
   .prices-list {
     background: var(--card);
@@ -27,7 +30,7 @@
     padding: 10px;
     box-shadow: var(--shadow);
     overflow: auto;
-    max-height: calc(100vh - 180px);
+    max-height: calc(100vh - 200px);
   }
   .prices-list .group-title {
     font-size: 11px;
@@ -36,7 +39,7 @@
     letter-spacing: .04em;
     padding: 8px 8px 4px;
   }
-  .prices-list button {
+  .prices-list .row-btn {
     display: block;
     width: 100%;
     text-align: left;
@@ -50,21 +53,21 @@
     color: var(--text);
     transition: background .12s, border-color .12s;
   }
-  .prices-list button:hover { background: var(--primary-soft); }
-  .prices-list button.active {
+  .prices-list .row-btn:hover { background: var(--primary-soft); }
+  .prices-list .row-btn.active {
     background: var(--primary-soft);
     border-color: var(--primary);
     color: var(--primary-hover);
     font-weight: 600;
   }
-  .prices-list button .meta {
+  .prices-list .row-btn .meta {
     display: block;
     font-size: 11px;
     color: var(--muted);
     margin-top: 2px;
     font-weight: 400;
   }
-  .prices-list button .ext {
+  .prices-list .row-btn .ext {
     float: right;
     font-size: 10px;
     background: var(--bg);
@@ -72,6 +75,13 @@
     padding: 1px 6px;
     border-radius: 4px;
     margin-left: 6px;
+  }
+  .prices-list .empty-hint {
+    padding: 14px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.6;
   }
 
   .prices-viewer {
@@ -102,6 +112,11 @@
     color: var(--muted);
     margin-top: 2px;
   }
+  .prices-viewer-head .head-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
   #viewer-slot {
     flex: 1;
     display: flex;
@@ -126,6 +141,61 @@
     text-align: center;
   }
 
+  /* page-head 우측 추가 버튼 자리 */
+  .page-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* 추가 모달 */
+  .pm-modal {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pm-modal[hidden] { display: none; }
+  .pm-backdrop {
+    position: absolute; inset: 0;
+    background: rgba(15, 23, 42, .55);
+  }
+  .pm-card {
+    position: relative;
+    background: #fff;
+    border-radius: 10px;
+    padding: 18px;
+    width: min(440px, 92vw);
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: var(--shadow-md);
+  }
+  .pm-card h3 { margin: 0 0 12px 0; font-size: 16px; }
+  .pm-field { display: block; margin-bottom: 10px; font-size: 13px; }
+  .pm-field span { display: block; margin-bottom: 3px; color: var(--text-soft); }
+  .pm-field input[type=text],
+  .pm-field input[type=file] {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    font: inherit;
+    background: #fff;
+  }
+  .pm-actions {
+    display: flex; gap: 8px; justify-content: flex-end;
+    margin-top: 12px;
+  }
+  .pm-status {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    min-height: 18px;
+  }
+  .pm-status.err { color: var(--danger); }
+  .pm-status.ok  { color: var(--success); }
+
   @media (max-width: 880px) {
     .prices-layout {
       grid-template-columns: 1fr;
@@ -143,11 +213,15 @@
       <h1>💵 가격표</h1>
       <p class="muted" style="margin:2px 0 0 0;">제조사 / 공급사별 단가표를 바로 열람합니다.</p>
     </div>
+    <div>
+      <button id="btn-add" class="btn primary" hidden>+ 가격표 추가</button>
+    </div>
   </div>
 
   <div class="prices-layout">
     <aside class="prices-list" id="prices-list">
       <div class="group-title">단가표 목록</div>
+      <div id="list-body"><div class="empty-hint">불러오는 중...</div></div>
     </aside>
     <section class="prices-viewer">
       <div class="prices-viewer-head">
@@ -155,104 +229,247 @@
           <h2 id="current-name">가격표를 선택하세요</h2>
           <div class="meta" id="current-meta">왼쪽에서 항목을 클릭하면 이 자리에 바로 열립니다.</div>
         </div>
-        <a id="open-new" class="btn ghost small" target="_blank" rel="noopener" style="display:none;">↗ 새 창</a>
+        <div class="head-actions">
+          <a id="open-new" class="btn ghost small" target="_blank" rel="noopener" style="display:none;">↗ 새 창</a>
+          <button id="btn-delete" class="btn danger small" hidden>🗑 삭제</button>
+        </div>
       </div>
       <div id="viewer-slot"><div class="prices-empty">단가표를 선택하면 여기에 표시됩니다.</div></div>
     </section>
   </div>
+
+  <div id="add-modal" class="pm-modal" hidden>
+    <div class="pm-backdrop" id="add-backdrop"></div>
+    <div class="pm-card">
+      <h3>가격표 추가</h3>
+      <label class="pm-field">
+        <span>파일 (xlsx / xls / pdf / docx / pptx, 50MB 이하)</span>
+        <input type="file" id="add-file" accept=".xlsx,.xls,.pdf,.docx,.doc,.pptx,.ppt">
+      </label>
+      <label class="pm-field">
+        <span>표시명 *</span>
+        <input type="text" id="add-label" placeholder="예: 교세라 부품 가격표">
+      </label>
+      <label class="pm-field">
+        <span>부가 설명 (선택)</span>
+        <input type="text" id="add-meta" placeholder="예: 2026.01 / 인상">
+      </label>
+      <div class="pm-actions">
+        <button id="add-cancel" class="btn ghost">취소</button>
+        <button id="add-submit" class="btn primary">업로드</button>
+      </div>
+      <div id="add-status" class="pm-status"></div>
+    </div>
+  </div>
 </main>
 
 <script>
-const FILES = [
-  { file: '1교세라부품 가격표_2026년1월.xlsx',
-    label: '교세라 부품 가격표', meta: '2026.01' },
-  { file: '2재생토너 단가표_위더스(202208).xlsx',
-    label: '위더스 재생토너 단가표', meta: '2022.08' },
-  { file: '3에스와이 토너이미지변동단가(202603).pdf',
-    label: '에스와이 토너/이미지 변동단가', meta: '2026.03' },
-  { file: '4케이지하이테크 교세라 단가표 KG2024 - 11월 카피어.xls',
-    label: '케이지하이테크 교세라 단가표', meta: 'KG2024 · 카피어 11월' },
-  { file: '★ 260406_시놀로지 공급 단가표 - (전 품목) 인상.xlsx',
-    label: '시놀로지 공급 단가표', meta: '2026.04.06 (전 품목 인상)' },
-];
+const listBody = document.getElementById('list-body');
+const slotEl   = document.getElementById('viewer-slot');
+const nameEl   = document.getElementById('current-name');
+const metaEl   = document.getElementById('current-meta');
+const openNew  = document.getElementById('open-new');
+const btnAdd   = document.getElementById('btn-add');
+const btnDel   = document.getElementById('btn-delete');
 
-const listEl  = document.getElementById('prices-list');
-const slotEl  = document.getElementById('viewer-slot');
-const nameEl  = document.getElementById('current-name');
-const metaEl  = document.getElementById('current-meta');
-const openNew = document.getElementById('open-new');
+let ROWS    = [];
+let CURRENT = null;
 
-// 파일 절대 URL — Office Viewer 는 인터넷에서 접근 가능한 절대 URL 필요.
-function absoluteFileUrl(filename) {
-  const base = new URL('.', location.href);  // .../prices/
-  return new URL(filename, base).href;
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-function viewerUrl(filename) {
-  const abs = absoluteFileUrl(filename);
-  if (/\.pdf$/i.test(filename)) {
-    return abs;  // 브라우저 내장 PDF 뷰어
-  }
+// file_path 가 절대 URL 이면 그대로 / 아니면 Storage public URL
+function fileUrl(row) {
+  if (/^https?:\/\//.test(row.file_path)) return row.file_path;
+  const sb = window.totalasAuth;
+  return sb.storage.from('prices').getPublicUrl(row.file_path).data.publicUrl;
+}
+
+function viewerUrl(row) {
+  const abs = fileUrl(row);
+  if ((row.ext || '').toLowerCase() === 'pdf') return encodeURI(abs);
   return 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(abs);
 }
 
-function ext(name) {
-  const m = name.match(/\.([^.]+)$/);
-  return m ? m[1].toUpperCase() : '';
-}
-
 function renderList() {
-  FILES.forEach((it, i) => {
+  listBody.innerHTML = '';
+  if (!ROWS.length) {
+    listBody.innerHTML = `
+      <div class="empty-hint">
+        등록된 가격표가 없습니다.<br>
+        ${btnAdd.hidden ? '(추가 권한이 있는 계정으로 로그인하세요)' : '우상단 <b>+ 가격표 추가</b> 버튼을 눌러 등록하세요.'}
+      </div>`;
+    return;
+  }
+  ROWS.forEach(row => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.dataset.idx = i;
+    btn.className = 'row-btn';
+    btn.dataset.id = row.id;
     btn.innerHTML = `
-      <span class="ext">${ext(it.file)}</span>
-      ${it.label}
-      <span class="meta">${it.meta}</span>
+      <span class="ext">${esc((row.ext || '').toUpperCase())}</span>
+      ${esc(row.label)}
+      <span class="meta">${esc(row.meta || '')}</span>
     `;
-    btn.addEventListener('click', () => select(i));
-    listEl.appendChild(btn);
+    btn.addEventListener('click', () => select(row.id));
+    listBody.appendChild(btn);
   });
 }
 
-function select(i) {
-  const it = FILES[i];
-  if (!it) return;
+function select(id) {
+  const row = ROWS.find(r => r.id === id);
+  if (!row) return;
+  CURRENT = row;
 
-  document.querySelectorAll('#prices-list button').forEach(b => {
-    b.classList.toggle('active', Number(b.dataset.idx) === i);
+  document.querySelectorAll('#list-body .row-btn').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.id) === id);
   });
 
-  nameEl.textContent = it.label;
-  metaEl.textContent = `${it.meta} · ${it.file}`;
+  nameEl.textContent = row.label;
+  const fname = decodeURIComponent((row.file_path.split('/').pop() || '').split('?')[0]);
+  metaEl.textContent = (row.meta ? row.meta + ' · ' : '') + fname;
+  openNew.href = fileUrl(row);
+  openNew.style.display = '';
+  btnDel.hidden = btnAdd.hidden;   // 인증된 사용자만 삭제 가능
 
-  // 로컬 환경(file:// 또는 localhost)에서는 Office Online Viewer 가
-  // 외부 접근 불가능한 경로를 못 읽으므로 안내 표시.
-  const isLocal = location.protocol === 'file:'
-              || /^(localhost|127\.|192\.168\.)/.test(location.hostname);
-  const isPdf  = /\.pdf$/i.test(it.file);
+  slotEl.innerHTML = `<iframe src="${esc(viewerUrl(row))}" title="${esc(row.label)}"></iframe>`;
+}
 
-  if (isLocal && !isPdf) {
-    slotEl.innerHTML = `
-      <div class="prices-empty">
-        로컬 환경에서는 Office 뷰어가 동작하지 않습니다.<br>
-        <a href="${absoluteFileUrl(it.file)}" target="_blank" style="color:var(--primary);text-decoration:underline;">
-          파일 직접 열기
-        </a>
-        — GitHub Pages 라이브에서는 정상 동작합니다.
-      </div>`;
-  } else {
-    slotEl.innerHTML = `<iframe src="${viewerUrl(it.file)}" title="${it.label}"></iframe>`;
+async function loadList() {
+  const sb = window.totalasAuth;
+  const { data, error } = await sb
+    .from('prices_index')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: false });
+  if (error) {
+    listBody.innerHTML = `<div class="empty-hint">불러오기 실패: ${esc(error.message)}</div>`;
+    return;
+  }
+  ROWS = data || [];
+  renderList();
+  // 첫 항목 자동 선택
+  if (ROWS.length && !CURRENT) select(ROWS[0].id);
+}
+
+// ---------- 추가 모달 ----------
+const modal    = document.getElementById('add-modal');
+const fInput   = document.getElementById('add-file');
+const lInput   = document.getElementById('add-label');
+const mInput   = document.getElementById('add-meta');
+const statusEl = document.getElementById('add-status');
+
+function openModal() {
+  fInput.value = '';
+  lInput.value = '';
+  mInput.value = '';
+  statusEl.textContent = '';
+  statusEl.className = 'pm-status';
+  modal.hidden = false;
+}
+function closeModal() { modal.hidden = true; }
+
+btnAdd.addEventListener('click', openModal);
+document.getElementById('add-cancel').addEventListener('click', closeModal);
+document.getElementById('add-backdrop').addEventListener('click', closeModal);
+
+// 파일 선택 시 표시명 자동 채움 (비어있을 때만)
+fInput.addEventListener('change', () => {
+  if (!lInput.value && fInput.files[0]) {
+    lInput.value = fInput.files[0].name.replace(/\.[^.]+$/, '');
+  }
+});
+
+function setStatus(text, kind) {
+  statusEl.textContent = text;
+  statusEl.className = 'pm-status' + (kind ? ' ' + kind : '');
+}
+
+document.getElementById('add-submit').addEventListener('click', async () => {
+  const file  = fInput.files[0];
+  const label = lInput.value.trim();
+  const meta  = mInput.value.trim();
+  if (!file)  return setStatus('파일을 선택하세요.', 'err');
+  if (!label) return setStatus('표시명을 입력하세요.', 'err');
+  if (file.size > 50 * 1024 * 1024) return setStatus('파일이 50MB 를 초과합니다.', 'err');
+
+  setStatus('업로드 중...');
+
+  const sb = window.totalasAuth;
+  const ts = Date.now();
+  const safeName = file.name.replace(/[^\w가-힣.\-]+/g, '_');
+  const path = `${ts}_${safeName}`;
+  const ext  = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+
+  // 1) Storage 업로드
+  const up = await sb.storage.from('prices').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (up.error) return setStatus('Storage 업로드 실패: ' + up.error.message, 'err');
+
+  // 2) DB insert
+  const ins = await sb.from('prices_index').insert({
+    label, meta: meta || null,
+    file_path: path, ext,
+    sort_order: (ROWS[ROWS.length - 1]?.sort_order || 0) + 1,
+    created_by: window.currentUser?.id || null,
+  }).select().single();
+
+  if (ins.error) {
+    // 롤백
+    await sb.storage.from('prices').remove([path]);
+    return setStatus('DB 등록 실패: ' + ins.error.message, 'err');
   }
 
-  openNew.href = absoluteFileUrl(it.file);
-  openNew.style.display = '';
-}
+  setStatus('완료', 'ok');
+  await loadList();
+  select(ins.data.id);
+  setTimeout(closeModal, 400);
+});
 
-renderList();
-// 첫 항목 자동 선택
-if (FILES.length) select(0);
+// ---------- 삭제 ----------
+btnDel.addEventListener('click', async () => {
+  if (!CURRENT) return;
+  if (!confirm(`"${CURRENT.label}" 가격표를 삭제할까요?\n(업로드된 파일도 함께 삭제됩니다)`)) return;
+
+  const sb = window.totalasAuth;
+  // Storage path 인 경우만 파일 제거 (GitHub URL fallback row 는 파일 건드리지 않음)
+  if (!/^https?:\/\//.test(CURRENT.file_path)) {
+    const r = await sb.storage.from('prices').remove([CURRENT.file_path]);
+    if (r.error) {
+      alert('파일 삭제 실패: ' + r.error.message);
+      return;
+    }
+  }
+  const { error } = await sb.from('prices_index').delete().eq('id', CURRENT.id);
+  if (error) return alert('DB 삭제 실패: ' + error.message);
+
+  CURRENT = null;
+  nameEl.textContent = '가격표를 선택하세요';
+  metaEl.textContent = '';
+  openNew.style.display = 'none';
+  btnDel.hidden = true;
+  slotEl.innerHTML = `<div class="prices-empty">단가표를 선택하면 여기에 표시됩니다.</div>`;
+  await loadList();
+});
+
+// ---------- 부팅 ----------
+async function boot() {
+  // 인증된 사용자만 추가/삭제 버튼 노출
+  if (window.currentUser) btnAdd.hidden = false;
+  await loadList();
+}
+if (window.currentUser) {
+  boot();
+} else {
+  document.addEventListener('totalas:ready', boot, { once: true });
+  // 안전망 — auth.js 가 늦으면 그래도 시도 (로그인 안 됐으면 RLS 차단)
+  setTimeout(() => { if (!ROWS.length) boot(); }, 2500);
+}
 </script>
 </body>
 </html>
