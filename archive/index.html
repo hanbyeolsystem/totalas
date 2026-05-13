@@ -4,20 +4,801 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>고객자료실 — 한별시스템</title>
+<script>
+  if (window === window.top && !new URLSearchParams(location.search).has('standalone')) {
+    location.replace('../asms.html#archive/index.html');
+  }
+</script>
 <link rel="stylesheet" href="../styles.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="../config.js"></script>
+<script src="../auth.js"></script>
+<style>
+  .alert-banner {
+    background: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-top: 14px;
+    font-size: 13px;
+    display: none;
+  }
+  .alert-banner.show { display: block; }
+  .alert-banner h3 { margin: 0 0 6px 0; font-size: 13px; color: #92400e; }
+  .alert-banner ul { margin: 0; padding-left: 18px; }
+  .alert-banner li { padding: 3px 0; cursor: pointer; }
+  .alert-banner li:hover { text-decoration: underline; }
+  .alert-banner .dday { font-weight: 700; margin-right: 6px; }
+  .alert-banner .dday.red    { color: #dc2626; }
+  .alert-banner .dday.orange { color: #d97706; }
+  .alert-banner .dday.gray   { color: #6b7280; }
+
+  .archive-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 14px;
+    margin-top: 14px;
+    min-height: calc(100vh - 240px);
+  }
+  @media (max-width: 880px) {
+    .archive-layout { grid-template-columns: 1fr; }
+    .customer-pane { max-height: 320px !important; }
+  }
+
+  .customer-pane, .content-pane {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    box-shadow: var(--shadow);
+  }
+  .customer-pane {
+    max-height: calc(100vh - 240px);
+    display: flex;
+    flex-direction: column;
+  }
+  .customer-search {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+  }
+  .customer-list { flex: 1; overflow: auto; }
+  .customer-list .row-btn {
+    display: block; width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin: 2px 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text);
+    transition: background .12s;
+  }
+  .customer-list .row-btn:hover { background: var(--primary-soft); }
+  .customer-list .row-btn.active {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary-hover);
+    font-weight: 600;
+  }
+  .customer-list .row-btn.new {
+    color: var(--primary);
+    border: 1px dashed var(--primary);
+  }
+  .customer-list .count {
+    float: right;
+    font-size: 11px;
+    background: var(--bg);
+    color: var(--muted);
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    font-weight: 400;
+  }
+  .customer-list .count.has-alert { background: #fee2e2; color: #dc2626; }
+
+  .content-pane.empty {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px; min-height: 300px;
+    text-align: center; padding: 30px;
+  }
+
+  .ct-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 0 4px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .ct-head h2 { margin: 0; font-size: 16px; }
+  .ct-head .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .ct-section { margin-bottom: 18px; }
+  .ct-section-head {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .ct-section-head h3 { margin: 0; font-size: 14px; color: var(--text-soft); }
+
+  .cat-filter { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+  .cat-filter button {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: 14px;
+    font-size: 12px;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text-soft);
+  }
+  .cat-filter button.active {
+    background: var(--primary); color: #fff; border-color: var(--primary);
+  }
+
+  .file-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px;
+  }
+  .file-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    cursor: pointer;
+    transition: border-color .12s, box-shadow .12s;
+    display: flex; flex-direction: column; gap: 4px;
+    position: relative;
+  }
+  .file-card:hover { border-color: var(--primary); box-shadow: var(--shadow); }
+  .file-card .cat-tag {
+    align-self: flex-start;
+    background: var(--bg); color: var(--muted);
+    font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  }
+  .file-card .label { font-size: 13px; font-weight: 600; line-height: 1.3; word-break: break-all; }
+  .file-card .meta  { font-size: 11px; color: var(--muted); }
+  .file-card .del-btn {
+    position: absolute; top: 6px; right: 6px;
+    background: #fff; border: 1px solid var(--border);
+    color: var(--muted); font-size: 12px; cursor: pointer;
+    padding: 1px 6px; border-radius: 4px;
+  }
+  .file-card .del-btn:hover { background: #fee2e2; color: var(--danger); border-color: var(--danger); }
+
+  .lic-list { display: flex; flex-direction: column; gap: 8px; }
+  .lic-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .lic-card.alert-red    { border-color: #dc2626; background: #fef2f2; }
+  .lic-card.alert-orange { border-color: #f59e0b; background: #fffbeb; }
+  .lic-head {
+    display: flex; justify-content: space-between;
+    gap: 8px; align-items: flex-start; flex-wrap: wrap;
+  }
+  .lic-head .name   { font-weight: 600; font-size: 13.5px; }
+  .lic-head .vendor { font-size: 11px; color: var(--muted); }
+  .lic-dday {
+    font-weight: 700; font-size: 13px;
+    padding: 2px 8px; border-radius: 4px;
+    background: var(--bg); color: var(--text-soft);
+    white-space: nowrap;
+  }
+  .lic-dday.red    { background: #fee2e2; color: #dc2626; }
+  .lic-dday.orange { background: #fed7aa; color: #9a3412; }
+  .lic-dday.gray   { background: var(--bg);  color: var(--muted); }
+  .lic-meta {
+    margin-top: 6px; font-size: 12px; color: var(--text-soft);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 4px 12px;
+  }
+  .lic-actions {
+    margin-top: 8px; display: flex; gap: 6px; justify-content: flex-end;
+  }
+
+  .pm-modal {
+    position: fixed; inset: 0; z-index: 1000;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pm-modal[hidden] { display: none; }
+  .pm-backdrop { position: absolute; inset: 0; background: rgba(15,23,42,.55); }
+  .pm-card {
+    position: relative; background: #fff;
+    border-radius: 10px; padding: 18px;
+    width: min(480px, 92vw); max-height: 90vh; overflow: auto;
+    box-shadow: var(--shadow-md);
+  }
+  .pm-card h3 { margin: 0 0 12px 0; font-size: 16px; }
+  .pm-field { display: block; margin-bottom: 10px; font-size: 13px; }
+  .pm-field span { display: block; margin-bottom: 3px; color: var(--text-soft); }
+  .pm-field input, .pm-field select, .pm-field textarea {
+    width: 100%; padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 13px; font: inherit;
+    background: #fff; box-sizing: border-box;
+  }
+  .pm-field textarea { resize: vertical; min-height: 60px; }
+  .pm-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pm-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+  .pm-status { margin-top: 8px; font-size: 12px; color: var(--muted); min-height: 18px; }
+  .pm-status.err { color: var(--danger); }
+  .pm-status.ok  { color: var(--success); }
+
+  .viewer-modal .pm-card {
+    width: min(900px, 96vw);
+    height: min(90vh, 800px);
+    padding: 0;
+    display: flex; flex-direction: column;
+  }
+  .viewer-modal .pm-card-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+  }
+  .viewer-modal .pm-card-head h3 { margin: 0; font-size: 14px; }
+  .viewer-modal iframe { flex: 1; width: 100%; border: 0; min-height: 0; }
+</style>
 </head>
 <body>
 <main class="container">
   <div class="page-head">
     <div>
       <h1>📁 고객자료실</h1>
-      <p class="muted" style="margin:2px 0 0 0;">계약서·통장사본·신분증 등 보관.</p>
+      <p class="muted" style="margin:2px 0 0 0;">고객별 자료 보관 + 소프트웨어 만기 추적.</p>
     </div>
   </div>
-  <div class="card" style="padding:24px; text-align:center; margin-top:14px;">
-    <p style="font-size:14px; margin:0;">이 페이지는 비어 있습니다.</p>
-    <p class="muted" style="margin-top:6px;">새 내용으로 채울 예정입니다.</p>
+
+  <div id="alert-banner" class="alert-banner">
+    <h3>⚠ 만기 임박 소프트웨어</h3>
+    <ul id="alert-list"></ul>
+  </div>
+
+  <div class="archive-layout">
+    <aside class="customer-pane">
+      <input type="text" id="customer-search" class="customer-search"
+             placeholder="고객명 검색 / 신규 입력" list="customer-suggestions" autocomplete="off">
+      <datalist id="customer-suggestions"></datalist>
+      <div class="customer-list" id="customer-list"></div>
+    </aside>
+
+    <section id="content-pane" class="content-pane empty">
+      좌측에서 고객을 선택하거나, 검색창에 새 고객명을 입력해 시작하세요.
+    </section>
+  </div>
+
+  <!-- 자료 업로드 -->
+  <div id="upload-modal" class="pm-modal" hidden>
+    <div class="pm-backdrop" data-close="1"></div>
+    <div class="pm-card">
+      <h3>자료 업로드</h3>
+      <label class="pm-field"><span>고객명</span><input type="text" id="up-customer" readonly></label>
+      <label class="pm-field"><span>파일 *</span><input type="file" id="up-file"></label>
+      <label class="pm-field"><span>카테고리 *</span>
+        <select id="up-category">
+          <option value="NAS설정">NAS설정</option>
+          <option value="소프트웨어">소프트웨어</option>
+          <option value="계약서">계약서</option>
+          <option value="사진">사진</option>
+          <option value="기타">기타</option>
+        </select>
+      </label>
+      <label class="pm-field"><span>표시명 *</span><input type="text" id="up-label" placeholder="예: DS220+ 초기 설정값"></label>
+      <label class="pm-field"><span>메모 (선택)</span><textarea id="up-notes" placeholder="설치 위치 / IP / 관련 라이선스 등"></textarea></label>
+      <div class="pm-actions">
+        <button class="btn ghost" data-close="1">취소</button>
+        <button id="up-submit" class="btn primary">업로드</button>
+      </div>
+      <div id="up-status" class="pm-status"></div>
+    </div>
+  </div>
+
+  <!-- 라이선스 등록/수정 -->
+  <div id="lic-modal" class="pm-modal" hidden>
+    <div class="pm-backdrop" data-close="1"></div>
+    <div class="pm-card">
+      <h3 id="lic-title">소프트웨어 라이선스 등록</h3>
+      <label class="pm-field"><span>고객명</span><input type="text" id="lic-customer" readonly></label>
+      <label class="pm-field"><span>소프트웨어명 *</span>
+        <input type="text" id="lic-software" placeholder="예: Windows Server 2022 / 한컴오피스 2024"></label>
+      <div class="pm-row">
+        <label class="pm-field"><span>제조사</span><input type="text" id="lic-vendor" placeholder="예: 한글과컴퓨터"></label>
+        <label class="pm-field"><span>수량</span><input type="number" id="lic-seats" min="1" value="1"></label>
+      </div>
+      <div class="pm-row">
+        <label class="pm-field"><span>구매일</span><input type="date" id="lic-purchase"></label>
+        <label class="pm-field"><span>만기일 *</span><input type="date" id="lic-expiry"></label>
+      </div>
+      <div class="pm-row">
+        <label class="pm-field"><span>구매 금액 (원)</span><input type="number" id="lic-amount" min="0"></label>
+        <label class="pm-field"><span>알림 시작 (D-N)</span><input type="number" id="lic-alert" min="0" value="30"></label>
+      </div>
+      <label class="pm-field"><span>라이선스 키 (선택)</span><input type="text" id="lic-key"></label>
+      <label class="pm-field"><span>메모 (선택)</span><textarea id="lic-notes"></textarea></label>
+      <div class="pm-actions">
+        <button class="btn ghost" data-close="1">취소</button>
+        <button id="lic-submit" class="btn primary">저장</button>
+      </div>
+      <div id="lic-status" class="pm-status"></div>
+    </div>
+  </div>
+
+  <!-- 자료 뷰어 -->
+  <div id="viewer-modal" class="pm-modal viewer-modal" hidden>
+    <div class="pm-backdrop" data-close="1"></div>
+    <div class="pm-card">
+      <div class="pm-card-head">
+        <h3 id="vw-title"></h3>
+        <div style="display:flex;gap:6px;">
+          <a id="vw-open" class="btn ghost small" target="_blank" rel="noopener">↗ 새 창</a>
+          <button class="btn ghost small" data-close="1">닫기</button>
+        </div>
+      </div>
+      <iframe id="vw-frame" src="about:blank"></iframe>
+    </div>
   </div>
 </main>
+
+<script>
+const $  = sel => document.querySelector(sel);
+const $$ = sel => document.querySelectorAll(sel);
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function fmtDate(d) { return d ? String(d).slice(0,10) : ''; }
+function dday(expiryStr) {
+  if (!expiryStr) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const exp = new Date(expiryStr); exp.setHours(0,0,0,0);
+  return Math.round((exp - today) / 86400000);
+}
+function ddayColor(d, alertDays) {
+  if (d == null) return 'gray';
+  if (d < 0)  return 'red';
+  if (d <= 7) return 'red';
+  if (d <= (alertDays || 30)) return 'orange';
+  return 'gray';
+}
+function ddayLabel(d) {
+  if (d == null) return '-';
+  if (d < 0)  return `D+${-d} 만료`;
+  if (d === 0) return 'D-0 (오늘)';
+  return `D-${d}`;
+}
+
+const STATE = {
+  customers:       [],
+  rental_names:    [],
+  selected:        null,
+  archives:        [],
+  licenses:        [],
+  category_filter: '전체',
+  alerts:          [],
+  editLicId:       null,
+};
+
+function sb() { return window.totalasAuth; }
+
+async function loadRentalCustomers() {
+  const { data, error } = await sb().from('rental_customers')
+    .select('id, company').eq('active', true).order('company');
+  if (error) return;
+  STATE.rental_names = (data || []).map(r => ({ id: r.id, name: r.company }));
+  const dl = $('#customer-suggestions');
+  dl.innerHTML = '';
+  STATE.rental_names.forEach(r => {
+    const opt = document.createElement('option');
+    opt.value = r.name;
+    dl.appendChild(opt);
+  });
+}
+
+async function loadCustomerIndex() {
+  const [arch, lic] = await Promise.all([
+    sb().from('customer_archives').select('customer_name'),
+    sb().from('software_licenses').select('customer_name, expiry_date, alert_days, status'),
+  ]);
+  const map = new Map();
+  (arch.data || []).forEach(r => {
+    const e = map.get(r.customer_name) || { name: r.customer_name, archives_count: 0, licenses_count: 0, has_alert: false };
+    e.archives_count++;
+    map.set(r.customer_name, e);
+  });
+  (lic.data || []).forEach(r => {
+    const e = map.get(r.customer_name) || { name: r.customer_name, archives_count: 0, licenses_count: 0, has_alert: false };
+    e.licenses_count++;
+    const d = dday(r.expiry_date);
+    if (r.status === 'active' && d != null && d <= (r.alert_days || 30)) e.has_alert = true;
+    map.set(r.customer_name, e);
+  });
+  STATE.customers = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  renderCustomerList();
+}
+
+async function loadAlerts() {
+  const { data } = await sb().from('software_licenses')
+    .select('id, customer_name, software_name, expiry_date, alert_days, status')
+    .eq('status', 'active');
+  STATE.alerts = (data || [])
+    .map(r => ({ ...r, d: dday(r.expiry_date) }))
+    .filter(r => r.d != null && r.d <= (r.alert_days || 30))
+    .sort((a, b) => a.d - b.d);
+  renderAlertBanner();
+}
+
+async function loadCustomerDetail(name) {
+  STATE.selected = name;
+  STATE.category_filter = '전체';
+  const [arch, lic] = await Promise.all([
+    sb().from('customer_archives').select('*').eq('customer_name', name)
+      .order('created_at', { ascending: false }),
+    sb().from('software_licenses').select('*').eq('customer_name', name)
+      .order('expiry_date', { ascending: true }),
+  ]);
+  STATE.archives = arch.data || [];
+  STATE.licenses = lic.data || [];
+  renderCustomerList();
+  renderContent();
+}
+
+function renderAlertBanner() {
+  const banner = $('#alert-banner');
+  const ul = $('#alert-list');
+  if (!STATE.alerts.length) { banner.classList.remove('show'); return; }
+  ul.innerHTML = '';
+  STATE.alerts.forEach(a => {
+    const li = document.createElement('li');
+    const color = ddayColor(a.d, a.alert_days);
+    li.innerHTML = `<span class="dday ${color}">${esc(ddayLabel(a.d))}</span>
+      <b>${esc(a.customer_name)}</b> — ${esc(a.software_name)}
+      <span class="muted">(${esc(fmtDate(a.expiry_date))})</span>`;
+    li.addEventListener('click', () => {
+      $('#customer-search').value = a.customer_name;
+      loadCustomerDetail(a.customer_name);
+    });
+    ul.appendChild(li);
+  });
+  banner.classList.add('show');
+}
+
+function renderCustomerList() {
+  const list = $('#customer-list');
+  const q = $('#customer-search').value.trim();
+  const ql = q.toLowerCase();
+  let items = STATE.customers;
+  if (q) items = items.filter(c => c.name.toLowerCase().includes(ql));
+
+  list.innerHTML = '';
+
+  // 신규 시작 버튼
+  if (q && !STATE.customers.find(c => c.name === q)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'row-btn new';
+    btn.innerHTML = `→ '${esc(q)}' 로 시작`;
+    btn.addEventListener('click', () => loadCustomerDetail(q));
+    list.appendChild(btn);
+  }
+
+  if (!items.length && !q) {
+    const hint = document.createElement('div');
+    hint.style.cssText = 'padding:14px;text-align:center;color:var(--muted);font-size:12.5px;';
+    hint.innerHTML = '자료가 등록된 고객이 없습니다.<br>위 검색창에 고객명을 입력해 시작하세요.';
+    list.appendChild(hint);
+    return;
+  }
+  items.forEach(c => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'row-btn' + (STATE.selected === c.name ? ' active' : '');
+    btn.innerHTML = `
+      <span class="count ${c.has_alert ? 'has-alert' : ''}">${c.archives_count}/${c.licenses_count}</span>
+      ${esc(c.name)}`;
+    btn.addEventListener('click', () => {
+      $('#customer-search').value = c.name;
+      loadCustomerDetail(c.name);
+    });
+    list.appendChild(btn);
+  });
+}
+
+function renderContent() {
+  const pane = $('#content-pane');
+  if (!STATE.selected) {
+    pane.classList.add('empty');
+    pane.innerHTML = '좌측에서 고객을 선택하거나, 검색창에 새 고객명을 입력해 시작하세요.';
+    return;
+  }
+  pane.classList.remove('empty');
+  const cats = ['전체','NAS설정','소프트웨어','계약서','사진','기타'];
+  pane.innerHTML = `
+    <div class="ct-head">
+      <div>
+        <h2>${esc(STATE.selected)}</h2>
+        <div class="sub">자료 ${STATE.archives.length}건 · 라이선스 ${STATE.licenses.length}건</div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn primary small" id="btn-upload">+ 자료 업로드</button>
+        <button class="btn primary small" id="btn-add-lic">+ 라이선스 등록</button>
+      </div>
+    </div>
+    <div class="ct-section">
+      <div class="ct-section-head"><h3>📂 자료 (${STATE.archives.length})</h3></div>
+      <div class="cat-filter" id="cat-filter">
+        ${cats.map(c => `<button data-cat="${esc(c)}" class="${STATE.category_filter === c ? 'active' : ''}">${esc(c)}</button>`).join('')}
+      </div>
+      <div class="file-grid" id="file-grid"></div>
+    </div>
+    <div class="ct-section">
+      <div class="ct-section-head"><h3>💿 소프트웨어 라이선스 (${STATE.licenses.length})</h3></div>
+      <div class="lic-list" id="lic-list"></div>
+    </div>
+  `;
+  $('#btn-upload').addEventListener('click', openUploadModal);
+  $('#btn-add-lic').addEventListener('click', () => openLicModal(null));
+  $$('#cat-filter button').forEach(b => {
+    b.addEventListener('click', () => { STATE.category_filter = b.dataset.cat; renderContent(); });
+  });
+  renderFileGrid();
+  renderLicList();
+}
+
+function renderFileGrid() {
+  const grid = $('#file-grid');
+  let items = STATE.archives;
+  if (STATE.category_filter !== '전체') {
+    items = items.filter(r => r.category === STATE.category_filter);
+  }
+  if (!items.length) {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:18px;text-align:center;color:var(--muted);font-size:12.5px;">
+      ${STATE.category_filter === '전체' ? '등록된 자료가 없습니다.' : `'${esc(STATE.category_filter)}' 자료가 없습니다.`}</div>`;
+    return;
+  }
+  grid.innerHTML = '';
+  items.forEach(r => {
+    const card = document.createElement('div');
+    card.className = 'file-card';
+    const notesShort = r.notes ? ' · ' + r.notes.slice(0, 30) + (r.notes.length > 30 ? '…' : '') : '';
+    card.innerHTML = `
+      <button class="del-btn" title="삭제">✕</button>
+      <span class="cat-tag">${esc(r.category)} · ${esc((r.ext || '').toUpperCase())}</span>
+      <div class="label">${esc(r.label)}</div>
+      <div class="meta">${esc(fmtDate(r.created_at))}${esc(notesShort)}</div>`;
+    card.querySelector('.del-btn').addEventListener('click', e => { e.stopPropagation(); deleteArchive(r); });
+    card.addEventListener('click', () => openViewer(r));
+    grid.appendChild(card);
+  });
+}
+
+function renderLicList() {
+  const list = $('#lic-list');
+  if (!STATE.licenses.length) {
+    list.innerHTML = '<div style="padding:14px;text-align:center;color:var(--muted);font-size:12.5px;">등록된 라이선스가 없습니다.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  STATE.licenses.forEach(r => {
+    const d = dday(r.expiry_date);
+    const color = r.status !== 'active' ? 'gray' : ddayColor(d, r.alert_days);
+    const cls = r.status !== 'active' ? '' : (color === 'red' ? 'alert-red' : color === 'orange' ? 'alert-orange' : '');
+    const card = document.createElement('div');
+    card.className = 'lic-card ' + cls;
+    card.innerHTML = `
+      <div class="lic-head">
+        <div>
+          <div class="name">${esc(r.software_name)}${r.seats > 1 ? ` <span class="vendor">×${r.seats}</span>` : ''}</div>
+          ${r.vendor ? `<div class="vendor">${esc(r.vendor)}</div>` : ''}
+        </div>
+        <div class="lic-dday ${color}">${esc(ddayLabel(d))}</div>
+      </div>
+      <div class="lic-meta">
+        ${r.purchase_date ? `<div>구매일: ${esc(fmtDate(r.purchase_date))}</div>` : ''}
+        <div>만기일: ${esc(fmtDate(r.expiry_date))}</div>
+        ${r.amount ? `<div>금액: ${Number(r.amount).toLocaleString()}원</div>` : ''}
+        ${r.license_key ? `<div>키: ${esc(r.license_key)}</div>` : ''}
+        ${r.status !== 'active' ? `<div>상태: ${esc(r.status)}</div>` : ''}
+      </div>
+      ${r.notes ? `<div class="muted" style="margin-top:4px;font-size:12px;">${esc(r.notes)}</div>` : ''}
+      <div class="lic-actions">
+        <button class="btn ghost small" data-act="edit">✎ 수정</button>
+        <button class="btn danger small" data-act="del">🗑 삭제</button>
+      </div>`;
+    card.querySelector('[data-act=edit]').addEventListener('click', () => openLicModal(r));
+    card.querySelector('[data-act=del]').addEventListener('click', () => deleteLicense(r));
+    list.appendChild(card);
+  });
+}
+
+function openUploadModal() {
+  if (!STATE.selected) return alert('고객을 먼저 선택하세요.');
+  $('#up-customer').value = STATE.selected;
+  $('#up-file').value = '';
+  $('#up-label').value = '';
+  $('#up-category').value = 'NAS설정';
+  $('#up-notes').value = '';
+  setStatus('#up-status', '', '');
+  $('#upload-modal').hidden = false;
+}
+
+$('#up-file').addEventListener('change', () => {
+  const f = $('#up-file').files[0];
+  if (f && !$('#up-label').value) {
+    $('#up-label').value = f.name.replace(/\.[^.]+$/, '');
+  }
+});
+
+function setStatus(sel, text, kind) {
+  const el = $(sel);
+  el.textContent = text;
+  el.className = 'pm-status' + (kind ? ' ' + kind : '');
+}
+
+$('#up-submit').addEventListener('click', async () => {
+  const customer = STATE.selected;
+  const file  = $('#up-file').files[0];
+  const cat   = $('#up-category').value;
+  const label = $('#up-label').value.trim();
+  const notes = $('#up-notes').value.trim();
+
+  if (!file)  return setStatus('#up-status', '파일을 선택하세요.', 'err');
+  if (!label) return setStatus('#up-status', '표시명을 입력하세요.', 'err');
+  if (file.size > 100 * 1024 * 1024) return setStatus('#up-status', '파일이 100MB 를 초과합니다.', 'err');
+
+  setStatus('#up-status', '업로드 중...');
+  const ts   = Date.now();
+  const safe = file.name.replace(/[^\w가-힣.\-]+/g, '_');
+  const customerSafe = customer.replace(/[^\w가-힣.\-]+/g, '_');
+  const path = `${customerSafe}/${ts}_${safe}`;
+  const ext  = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+
+  const up = await sb().storage.from('archives').upload(path, file, {
+    cacheControl: '3600', upsert: false, contentType: file.type || undefined,
+  });
+  if (up.error) return setStatus('#up-status', 'Storage 실패: ' + up.error.message, 'err');
+
+  const rc = STATE.rental_names.find(r => r.name === customer);
+  const ins = await sb().from('customer_archives').insert({
+    customer_name: customer,
+    rental_customer_id: rc ? rc.id : null,
+    category: cat, label, file_path: path, ext,
+    file_size: file.size,
+    notes: notes || null,
+    created_by: window.currentUser?.id || null,
+  }).select().single();
+
+  if (ins.error) {
+    await sb().storage.from('archives').remove([path]);
+    return setStatus('#up-status', 'DB 등록 실패: ' + ins.error.message, 'err');
+  }
+  setStatus('#up-status', '완료', 'ok');
+  await Promise.all([loadCustomerDetail(customer), loadCustomerIndex()]);
+  setTimeout(() => $('#upload-modal').hidden = true, 300);
+});
+
+async function deleteArchive(row) {
+  if (!confirm(`"${row.label}" 자료를 삭제할까요?`)) return;
+  const r1 = await sb().storage.from('archives').remove([row.file_path]);
+  if (r1.error) return alert('파일 삭제 실패: ' + r1.error.message);
+  const r2 = await sb().from('customer_archives').delete().eq('id', row.id);
+  if (r2.error) return alert('DB 삭제 실패: ' + r2.error.message);
+  await Promise.all([loadCustomerDetail(STATE.selected), loadCustomerIndex()]);
+}
+
+async function openViewer(row) {
+  const { data, error } = await sb().storage.from('archives').createSignedUrl(row.file_path, 3600);
+  if (error) return alert('URL 생성 실패: ' + error.message);
+  const url = data.signedUrl;
+  $('#vw-title').textContent = row.label;
+  $('#vw-open').href = url;
+  const isOffice = /\.(xlsx?|docx?|pptx?)$/i.test(row.file_path);
+  let src;
+  if (isOffice) src = 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(url);
+  else src = url;
+  $('#vw-frame').src = src;
+  $('#viewer-modal').hidden = false;
+}
+
+function openLicModal(row) {
+  if (!STATE.selected) return alert('고객을 먼저 선택하세요.');
+  STATE.editLicId = row ? row.id : null;
+  $('#lic-title').textContent = row ? '라이선스 수정' : '소프트웨어 라이선스 등록';
+  $('#lic-customer').value = STATE.selected;
+  $('#lic-software').value = row?.software_name || '';
+  $('#lic-vendor').value   = row?.vendor || '';
+  $('#lic-seats').value    = row?.seats || 1;
+  $('#lic-purchase').value = row?.purchase_date || '';
+  $('#lic-expiry').value   = row?.expiry_date || '';
+  $('#lic-amount').value   = row?.amount || '';
+  $('#lic-alert').value    = row?.alert_days || 30;
+  $('#lic-key').value      = row?.license_key || '';
+  $('#lic-notes').value    = row?.notes || '';
+  setStatus('#lic-status', '', '');
+  $('#lic-modal').hidden = false;
+}
+
+$('#lic-submit').addEventListener('click', async () => {
+  const customer = STATE.selected;
+  const software = $('#lic-software').value.trim();
+  const expiry   = $('#lic-expiry').value;
+  if (!customer) return setStatus('#lic-status', '고객이 선택되지 않았습니다.', 'err');
+  if (!software) return setStatus('#lic-status', '소프트웨어명을 입력하세요.', 'err');
+  if (!expiry)   return setStatus('#lic-status', '만기일을 입력하세요.', 'err');
+
+  const rc = STATE.rental_names.find(r => r.name === customer);
+  const payload = {
+    customer_name: customer,
+    rental_customer_id: rc ? rc.id : null,
+    software_name: software,
+    vendor: $('#lic-vendor').value.trim() || null,
+    seats: parseInt($('#lic-seats').value) || 1,
+    purchase_date: $('#lic-purchase').value || null,
+    expiry_date: expiry,
+    amount: parseInt($('#lic-amount').value) || null,
+    alert_days: parseInt($('#lic-alert').value) || 30,
+    license_key: $('#lic-key').value.trim() || null,
+    notes: $('#lic-notes').value.trim() || null,
+  };
+  setStatus('#lic-status', '저장 중...');
+  let res;
+  if (STATE.editLicId) {
+    res = await sb().from('software_licenses').update(payload).eq('id', STATE.editLicId);
+  } else {
+    payload.created_by = window.currentUser?.id || null;
+    res = await sb().from('software_licenses').insert(payload);
+  }
+  if (res.error) return setStatus('#lic-status', '저장 실패: ' + res.error.message, 'err');
+  setStatus('#lic-status', '완료', 'ok');
+  await Promise.all([loadCustomerDetail(customer), loadCustomerIndex(), loadAlerts()]);
+  setTimeout(() => $('#lic-modal').hidden = true, 300);
+});
+
+async function deleteLicense(row) {
+  if (!confirm(`"${row.software_name}" 라이선스를 삭제할까요?`)) return;
+  const { error } = await sb().from('software_licenses').delete().eq('id', row.id);
+  if (error) return alert('삭제 실패: ' + error.message);
+  await Promise.all([loadCustomerDetail(STATE.selected), loadCustomerIndex(), loadAlerts()]);
+}
+
+// 모달 닫기 (모든 [data-close="1"] 공통)
+$$('[data-close="1"]').forEach(el => {
+  el.addEventListener('click', () => {
+    const m = el.closest('.pm-modal');
+    if (!m) return;
+    m.hidden = true;
+    if (m.id === 'viewer-modal') $('#vw-frame').src = 'about:blank';
+  });
+});
+
+$('#customer-search').addEventListener('input', renderCustomerList);
+$('#customer-search').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const v = $('#customer-search').value.trim();
+    if (v) loadCustomerDetail(v);
+  }
+});
+
+async function boot() {
+  await Promise.all([loadRentalCustomers(), loadCustomerIndex(), loadAlerts()]);
+}
+if (window.currentUser) {
+  boot();
+} else {
+  document.addEventListener('totalas:ready', boot, { once: true });
+  setTimeout(() => { if (!STATE.customers.length) boot(); }, 2500);
+}
+</script>
 </body>
 </html>
