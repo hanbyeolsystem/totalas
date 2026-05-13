@@ -309,6 +309,263 @@
     .rc-modal-box { max-height: 95vh; }
     .rc-form-row.two { grid-template-columns: 1fr; }
   }
+
+  /* =============================================================
+     계약서 카드 (우측 상세 패널) — 거래처별 계약서 리스트
+     ============================================================= */
+  .rc-ct-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    margin-bottom: 6px;
+    cursor: pointer;
+    background: #fff;
+    transition: all .12s;
+  }
+  .rc-ct-row:hover { border-color: var(--primary); background: var(--primary-soft, #eff6ff); }
+  .rc-ct-row-main { min-width: 0; flex: 1; }
+  .rc-ct-row-title { font-weight: 600; font-size: 13px; }
+  .rc-ct-row-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .rc-ct-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .3px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .rc-ct-badge.draft     { background: #e5e7eb; color: #374151; }
+  .rc-ct-badge.signed    { background: #dbeafe; color: #1e40af; }
+  .rc-ct-badge.active    { background: #d1fae5; color: #065f46; }
+  .rc-ct-badge.terminated{ background: #fee2e2; color: #991b1b; }
+
+  /* =============================================================
+     계약서 에디터 풀스크린 모달
+     ============================================================= */
+  .ct-edit-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(15, 23, 42, .55);
+    display: none;
+    z-index: 1200;
+  }
+  .ct-edit-backdrop.show { display: block; }
+
+  .ct-edit-modal {
+    position: fixed;
+    inset: 12px;
+    background: #f3f5f9;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  @media (max-width: 640px) {
+    .ct-edit-modal { inset: 0; border-radius: 0; }
+  }
+
+  /* sticky 헤더 */
+  .ct-edit-head {
+    background: #fff;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .ct-edit-head .ct-h-left { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .ct-edit-head .ct-h-title { font-weight: 700; font-size: 14.5px; }
+  .ct-edit-head .ct-h-meta  { font-size: 11.5px; color: var(--muted); }
+  .ct-edit-head .ct-h-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .ct-edit-head select, .ct-edit-head input { font-size: 12.5px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border-strong, #cbd5e1); }
+
+  /* 본문 — 스크롤 */
+  .ct-edit-body {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 16px 60px 16px;
+    min-width: 0;
+  }
+  .ct-edit-body .contract-doc { min-width: 800px; margin: 0 auto; max-width: 220mm; }
+
+  @media (max-width: 720px) {
+    .ct-edit-body { padding: 12px 8px 60px 8px; }
+    .ct-edit-body .contract-doc { min-width: 800px; }   /* 가로 스크롤 허용 */
+  }
+
+  /* 페이지 구분선 (화면용) */
+  .ct-page-divider {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    margin: 8px 0 16px 0;
+    letter-spacing: 1px;
+  }
+
+  /* 품목 프리셋 드롭다운 자리 */
+  .ct-preset-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0 10px 0;
+    font-size: 12.5px;
+    flex-wrap: wrap;
+  }
+  .ct-preset-row select { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-strong, #cbd5e1); }
+
+  /* 행 액션 컬럼 */
+  .ct-tbl-items td .ct-row-del {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--danger, #dc2626);
+    padding: 2px 7px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+  }
+  .ct-tbl-items td .ct-row-del:hover { background: #fee2e2; }
+  .ct-input[disabled] {
+    background: #f1f5f9 !important;
+    color: #94a3b8;
+    cursor: not-allowed;
+  }
+
+  /* 합계 박스 */
+  .ct-total-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    margin: 8px 0;
+    font-size: 12px;
+  }
+  .ct-total-cell {
+    background: #f4f4f4;
+    border: 1px solid #555;
+    padding: 6px 10px;
+    text-align: center;
+  }
+  .ct-total-cell.total { background: #fde68a; font-weight: 700; }
+  .ct-total-cell label { display: block; font-size: 10.5px; color: #555; margin-bottom: 2px; letter-spacing: .5px; }
+  .ct-total-cell .v { font-size: 13px; font-weight: 600; }
+
+  /* 약관 행 */
+  .ct-term-row {
+    display: grid;
+    grid-template-columns: 64px 1fr 80px 28px;
+    gap: 8px;
+    align-items: start;
+    padding: 8px 0;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .ct-term-row:last-child { border-bottom: none; }
+  .ct-term-row .ct-term-no  { font-weight: 700; font-size: 11.5px; padding-top: 4px; }
+  .ct-term-row .ct-term-tt  { padding-top: 4px; }
+  .ct-term-row .ct-term-tt input { width: 100%; font-weight: 700; font-size: 11.5px; }
+  .ct-term-row textarea { width: 100%; min-height: 56px; font-size: 11px; padding: 5px 7px; border: 1px solid var(--border); border-radius: 5px; font-family: inherit; resize: vertical; }
+  .ct-term-row .ct-term-chk { padding-top: 6px; }
+  .ct-term-row .ct-term-rm  { padding-top: 4px; text-align: right; }
+  .ct-term-row .ct-term-rm button { background: transparent; border: none; color: var(--danger); cursor: pointer; font-size: 14px; }
+
+  /* CMS 결제수단 — 활성/비활성 */
+  .ct-pay-block {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    background: #fff;
+  }
+  .ct-pay-block.disabled {
+    opacity: .45;
+    background: #f9fafb;
+    pointer-events: none;
+  }
+  .ct-pay-block h5 { margin: 0 0 8px 0; font-size: 12.5px; font-weight: 700; }
+  .ct-pay-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px;
+  }
+  .ct-pay-grid label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 2px; }
+  .ct-pay-grid input { width: 100%; padding: 5px 7px; border: 1px solid var(--border); border-radius: 5px; font-size: 12px; }
+
+  /* 서명 캔버스 */
+  .ct-sign-wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 14px;
+  }
+  @media (max-width: 720px) {
+    .ct-sign-wrap { grid-template-columns: 1fr; }
+  }
+  .ct-sign-box {
+    border: 1px solid #555;
+    background: #fff;
+    padding: 8px;
+    border-radius: 4px;
+  }
+  .ct-sign-label {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .ct-sign-canvas {
+    display: block;
+    width: 100%;
+    height: 150px;
+    border: 1px dashed #94a3b8;
+    border-radius: 4px;
+    background: #fcfdff;
+    touch-action: none;          /* 모바일 스크롤 차단 */
+    cursor: crosshair;
+  }
+  .ct-sign-clear {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--text-soft, #475569);
+  }
+  .ct-sign-clear:hover { background: #fee2e2; color: var(--danger); border-color: var(--danger); }
+
+  /* 인쇄: 에디터 헤더/모달 backdrop/체크/삭제 버튼 숨김 + 모달 전체 풀스크린화 */
+  @media print {
+    html, body { background: #fff !important; }
+    body * { visibility: hidden !important; }
+    .ct-edit-backdrop, .ct-edit-modal,
+    .ct-edit-modal *, .ct-edit-modal *::before, .ct-edit-modal *::after { visibility: visible !important; }
+    .ct-edit-backdrop { background: transparent !important; }
+    .ct-edit-modal {
+      position: static !important;
+      inset: auto !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      background: #fff !important;
+      display: block !important;
+      overflow: visible !important;
+    }
+    .ct-edit-head, .ct-preset-row, .ct-row-del, .ct-term-rm, .ct-sign-clear,
+    .ct-page-divider, .no-print { display: none !important; }
+    .ct-edit-body { padding: 0 !important; overflow: visible !important; }
+    .ct-edit-body .contract-doc { min-width: 0 !important; max-width: none !important; }
+    .ct-pay-block.disabled { display: none !important; }
+    .ct-sign-canvas { border: none !important; background: transparent !important; }
+    .ct-sign-box { border: 1px solid #555 !important; }
+    @page { size: A4; margin: 15mm 12mm; }
+  }
 </style>
 </head>
 <body>
@@ -383,6 +640,14 @@
 
 <!-- 토스트 -->
 <div class="rc-toast" id="rc-toast"></div>
+
+<!-- 계약서 에디터 풀스크린 모달 -->
+<div class="ct-edit-backdrop" id="ct-edit-backdrop">
+  <div class="ct-edit-modal" id="ct-edit-modal">
+    <div class="ct-edit-head no-print" id="ct-edit-head"><!-- JS 렌더 --></div>
+    <div class="ct-edit-body" id="ct-edit-body"><!-- JS 렌더 --></div>
+  </div>
+</div>
 
 <template id="tpl-customer-form">
   <h3 id="form-title">거래처 추가</h3>
@@ -559,6 +824,6 @@
   </form>
 </template>
 
-<script src="index.js?v=20260513c"></script>
+<script src="index.js?v=20260513d"></script>
 </body>
 </html>

@@ -856,3 +856,1026 @@ function escapeHtml(s) {
     ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
+
+// =============================================================
+// 계약서 (rental_contracts) — 4페이지 디지털 양식
+// =============================================================
+
+// 공급자(한별시스템) 고정 정보
+const SUPPLIER_INFO = {
+  company: '한별시스템',
+  ceo: '이한별',
+  biz_no: '000-00-00000',
+  address: '대구광역시',
+  phone: '053-000-0000',
+  email: '',
+};
+
+// 품목 프리셋 (JSON 상수)
+const PRESETS = {
+  'PC':       { model: '',  bw_free: 0,    co_free: 0,   bw_rate: 0,  co_rate: 0,   qty: 1, monthly_fee: 0,     fixed_quota: true  },
+  'monitor':  { model: '',  bw_free: 0,    co_free: 0,   bw_rate: 0,  co_rate: 0,   qty: 1, monthly_fee: 0,     fixed_quota: true  },
+  '잉크젯':   { model: '',  bw_free: 500,  co_free: 200, bw_rate: 10, co_rate: 100, qty: 1, monthly_fee: 0,     install_fee: 0      },
+  '레이저':   { model: '',  bw_free: 1000, co_free: 0,   bw_rate: 15, co_rate: 0,   qty: 1, monthly_fee: 0,     install_fee: 100000, removal_fee: 100000, reg_fee: 200000 },
+  '복합기':   { model: '',  bw_free: 1500, co_free: 500, bw_rate: 15, co_rate: 100, qty: 1, monthly_fee: 0,     install_fee: 100000, removal_fee: 100000, reg_fee: 200000 },
+  '웰리스':   { model: '',  bw_free: 0,    co_free: 0,   bw_rate: 0,  co_rate: 0,   qty: 1, monthly_fee: 0,     filter_cycle_months: 2, fixed_quota: true },
+  'NAS':      { model: '',  bw_free: 0,    co_free: 0,   bw_rate: 0,  co_rate: 0,   qty: 1, monthly_fee: 0,     fixed_quota: true  },
+};
+
+// 기본 약관 (제1~10조)
+const DEFAULT_TERMS = [
+  { article: 1,  title: '목적',           body: '임대인(공급자, 한별시스템)은 임차인(신청인)에게 본 계약 물품을 임대하고, 임차인은 이에 대한 월 렌탈료 및 추가 사용료를 지급한다.', confirmed: false },
+  { article: 2,  title: '계약기간',       body: '본 계약의 기간은 위 표에 기재된 시작일부터 종료일까지로 하며, 기간 만료 1개월 전까지 별도의 의사표시가 없을 경우 동일 조건으로 1년 단위 자동 갱신된다.', confirmed: false },
+  { article: 3,  title: '설치 및 철거',   body: '레이저 프린터·디지털 복합기의 설치비 100,000원, 철거비 100,000원, 등록비 200,000원이 별도로 부과된다. 잉크젯·PC·모니터·웰리스 제균기·NAS는 설치비 무료를 원칙으로 한다.', confirmed: false },
+  { article: 4,  title: '소유권',         body: '임대 물품의 소유권은 임대인(한별시스템)에게 있으며, 임차인은 임대 물품에 대한 어떠한 형태의 양도·전대·담보 제공도 할 수 없다.', confirmed: false },
+  { article: 5,  title: '소모품 및 유지보수', body: '토너·잉크·필터 등 표준 소모품은 임대인이 무상 공급하며, 정기 유지보수(AS) 또한 임대인 책임 하에 수행된다. 단, 임차인의 고의·과실로 인한 부품 손상은 별도 청구된다.', confirmed: false },
+  { article: 6,  title: '대금 지급',      body: '월 렌탈료 및 추가 사용료(카운터 점검 후 청구분 포함)는 매월 25일(약정일) 자동이체로 출금된다. 결제 실패 시 즉시 통보하여 차회 합산 출금된다.', confirmed: false },
+  { article: 7,  title: '보증금',         body: '보증금은 월 렌탈료(VAT 포함)의 2개월치를 원칙으로 하며, 계약 정상 종료 후 물품 회수·정상 반납 확인을 거쳐 7일 이내 반환한다.', confirmed: false },
+  { article: 8,  title: '계약해지',       body: '월 렌탈료가 3개월 이상 미납되거나 본 계약을 중대하게 위반한 경우, 임대인은 별도의 최고 없이 본 계약을 일방적으로 해지할 수 있다.', confirmed: false },
+  { article: 9,  title: '손해배상',       body: '임차인의 고의·과실로 인하여 임대 물품이 파손·분실되거나 회수가 불가능한 경우, 잔여 임대료 및 물품 잔존가액을 임차인이 별도로 배상한다.', confirmed: false },
+  { article: 10, title: '분쟁해결',       body: '본 계약의 해석 및 이행에 관한 분쟁은 양 당사자가 협의하여 해결하되, 협의 불가 시 대구지방법원을 1심 관할법원으로 한다.', confirmed: false },
+];
+
+const DEFAULT_EXTRAS = [
+  { text: '카운터 점검 후 산정된 추가 출력료(흑백·컬러)는 익월 자동이체로 합산 청구된다.',         confirmed: false },
+  { text: '임대 물품의 양도·전대·담보 제공을 금지한다.',                                            confirmed: false },
+  { text: '사업장 이전 시 30일 전 임대인에게 통보하여야 하며, 이전 설치비는 임차인이 부담한다.',   confirmed: false },
+  { text: '계약 종료 시 임차인은 물품을 정상 상태로 반납하여야 하며, 회수 후 보증금이 반환된다.', confirmed: false },
+];
+
+// 편집 중인 계약서 상태
+const CT_STATE = {
+  customer: null,
+  contract: null,        // 현재 편집 객체
+  signaturePads: {},     // { supplier: SignaturePad, applicant: SignaturePad }
+  byCustomer: {},        // { customer_id: [contracts...] }
+};
+
+function newContractDraft(customer) {
+  const id = `ct_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const today = new Date();
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const start = ymd(today);
+  const end = new Date(today.getFullYear() + 3, today.getMonth(), today.getDate());
+  const seq = String((CT_STATE.byCustomer[customer.id] || []).length + 1).padStart(2, '0');
+  return {
+    id,
+    customer_id: customer.id,
+    contract_no: `${today.getFullYear()}-${seq}`,
+    contract_date: ymd(today),
+    period_years: 3,
+    period_start: start,
+    period_end: ymd(end),
+    deposit: 0,
+    install_fee: 0,
+    company_snapshot:      customer.company || '',
+    contact_name_snapshot: customer.contact_name || '',
+    biz_no_snapshot:       customer.biz_no || '',
+    address_snapshot:      customer.address || '',
+    phone_snapshot:        customer.phone || customer.mobile || '',
+    email_snapshot:        customer.email || '',
+    items: [],
+    terms:  JSON.parse(JSON.stringify(DEFAULT_TERMS)),
+    extras: JSON.parse(JSON.stringify(DEFAULT_EXTRAS)),
+    special_terms: '',
+    payment_method: 'account',
+    payment_info: {
+      account: { bank: '', account_no: '', holder: '', biz_no: customer.biz_no || '', draft_day: 25 },
+      card:    { card_brand: '', card_no: '', expiry: '', holder: '', draft_day: 25 },
+    },
+    sign_supplier: '',
+    sign_applicant: '',
+    signed_at: null,
+    status: 'draft',
+    notes: '',
+  };
+}
+
+// 자동 계산 ─────────────────────────────────────────────
+function calcRowTotal(row) {
+  return (Number(row.qty) || 0) * (Number(row.monthly_fee) || 0);
+}
+function calcGrand(items) {
+  const sub = items.reduce((s, r) => s + calcRowTotal(r), 0);
+  const vat = Math.round(sub * 0.1);
+  return { sub, vat, total: sub + vat };
+}
+function suggestDeposit(items) {
+  const sub = items.reduce((s, r) => s + calcRowTotal(r), 0);
+  return sub * 2;
+}
+
+// 계약서 목록 로드 (특정 거래처) ────────────────────────
+async function loadContractsFor(customerId) {
+  const supa = window.totalasAuth;
+  if (!supa) return [];
+  try {
+    const { data, error } = await supa
+      .from('rental_contracts')
+      .select('*')
+      .eq('customer_id', customerId)
+      .order('contract_date', { ascending: false });
+    if (error) throw error;
+    CT_STATE.byCustomer[customerId] = data || [];
+    return data || [];
+  } catch (err) {
+    console.warn('계약서 로드 실패:', err.message || err);
+    CT_STATE.byCustomer[customerId] = [];
+    return [];
+  }
+}
+
+// 계약서 카드 렌더 (우측 상세 패널) ─────────────────────
+function renderContractCard(customer) {
+  const list = CT_STATE.byCustomer[customer.id] || [];
+  const rows = list.map(ct => {
+    const status = (ct.status || 'draft').toLowerCase();
+    const statusLabel = ({
+      'draft':      '작성중',
+      'signed':     '서명완료',
+      'active':     '진행중',
+      'terminated': '해지',
+    })[status] || status;
+    const items = Array.isArray(ct.items) ? ct.items : [];
+    const grand = calcGrand(items);
+    return `
+      <div class="rc-ct-row" data-ctid="${escapeAttr(ct.id)}">
+        <div class="rc-ct-row-main">
+          <div class="rc-ct-row-title">${escapeHtml(ct.contract_no || '-')} · ${escapeHtml(ct.contract_date || '-')}</div>
+          <div class="rc-ct-row-sub">
+            품목 ${items.length}건 · 월 합계 ${grand.total.toLocaleString()}원 (VAT포함)
+            ${ct.period_start && ct.period_end ? ` · ${ct.period_start} ~ ${ct.period_end}` : ''}
+          </div>
+        </div>
+        <span class="rc-ct-badge ${status}">${statusLabel}</span>
+      </div>
+    `;
+  }).join('') || `<p class="muted" style="margin:0; font-size:12.5px;">아직 작성된 계약서가 없습니다.</p>`;
+
+  return `
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+        <h3 style="margin:0;">📄 계약서 <span class="muted-small" style="font-weight:400;">${list.length}건</span></h3>
+        <button class="btn small primary" id="btn-ct-new">+ 신규 계약서 작성</button>
+      </div>
+      ${rows}
+    </div>
+  `;
+}
+
+// 계약서 에디터 열기 ────────────────────────────────────
+function openContractEditor(customer, existing) {
+  CT_STATE.customer = customer;
+  CT_STATE.contract = existing
+    ? JSON.parse(JSON.stringify(existing))   // 깊은 복사 (수정 취소 가능하게)
+    : newContractDraft(customer);
+  CT_STATE.signaturePads = {};
+
+  document.getElementById('ct-edit-backdrop').classList.add('show');
+  renderContractEditor();
+}
+
+function closeContractEditor() {
+  document.getElementById('ct-edit-backdrop').classList.remove('show');
+  // 캔버스 정리
+  CT_STATE.signaturePads = {};
+  CT_STATE.contract = null;
+}
+
+// 계약서 에디터 렌더 (헤더 + 4페이지) ──────────────────
+function renderContractEditor() {
+  const ct = CT_STATE.contract;
+  const cu = CT_STATE.customer;
+  if (!ct || !cu) return;
+
+  const head = document.getElementById('ct-edit-head');
+  const body = document.getElementById('ct-edit-body');
+
+  // ── 헤더 ──────────────────
+  const statusLabel = ({
+    'draft': '작성중', 'signed': '서명완료', 'active': '진행중', 'terminated': '해지',
+  })[ct.status] || ct.status;
+  head.innerHTML = `
+    <div class="ct-h-left">
+      <div class="ct-h-title">
+        ${escapeHtml(cu.company || '-')}
+        <span class="rc-ct-badge ${escapeAttr(ct.status)}" style="margin-left:8px;">${escapeHtml(statusLabel)}</span>
+      </div>
+      <div class="ct-h-meta">계약번호 ${escapeHtml(ct.contract_no)} · 작성 ${escapeHtml(ct.contract_date)}</div>
+    </div>
+    <div class="ct-h-actions">
+      <select id="ct-h-status" title="상태">
+        <option value="draft"     ${ct.status === 'draft'      ? 'selected' : ''}>작성중</option>
+        <option value="signed"    ${ct.status === 'signed'     ? 'selected' : ''}>서명완료</option>
+        <option value="active"    ${ct.status === 'active'     ? 'selected' : ''}>진행중</option>
+        <option value="terminated"${ct.status === 'terminated' ? 'selected' : ''}>해지</option>
+      </select>
+      <button class="btn small" id="ct-btn-print">🖨 인쇄</button>
+      <button class="btn small primary" id="ct-btn-save">💾 저장</button>
+      ${ct._existing ? `<button class="btn small danger" id="ct-btn-delete">🗑 삭제</button>` : ''}
+      <button class="btn small ghost" id="ct-btn-close">✕ 닫기</button>
+    </div>
+  `;
+
+  // ── 본문: 4 페이지 ───────
+  body.innerHTML = `
+    <div class="contract-doc">
+      ${renderPage1()}
+      <div class="ct-page-divider no-print">― Page 2 ―</div>
+      ${renderPage2()}
+      <div class="ct-page-divider no-print">― Page 3 ―</div>
+      ${renderPage3()}
+      <div class="ct-page-divider no-print">― Page 4 ―</div>
+      ${renderPage4()}
+    </div>
+  `;
+
+  // 헤더 액션
+  document.getElementById('ct-h-status').addEventListener('change', (e) => { ct.status = e.target.value; });
+  document.getElementById('ct-btn-close').addEventListener('click', closeContractEditor);
+  document.getElementById('ct-btn-print').addEventListener('click', () => window.print());
+  document.getElementById('ct-btn-save').addEventListener('click', saveContract);
+  const delBtn = document.getElementById('ct-btn-delete');
+  if (delBtn) delBtn.addEventListener('click', deleteContract);
+
+  bindEditorEvents();
+  initSignaturePads();
+  recalcTotals();
+}
+
+// ── 페이지 1: 표지 ─────────────────────────────────────
+function renderPage1() {
+  const ct = CT_STATE.contract;
+  return `
+    <section class="contract-page">
+      <div class="ct-cover-head">
+        <div class="ct-cover-title">임대(렌탈) 계약서</div>
+        <div class="ct-cover-company" style="text-align:right; font-size:12px;">
+          계약번호 <input type="text" class="ct-input ed" data-field="contract_no" value="${escapeAttr(ct.contract_no)}" style="width:120px; display:inline-block;">
+          <br>작성일 <input type="date" class="ct-input ed" data-field="contract_date" value="${escapeAttr(ct.contract_date)}" style="width:140px; display:inline-block;">
+        </div>
+      </div>
+
+      <div class="section-title" style="margin-top:12px;">계 약 당 사 자</div>
+
+      <table class="ct-tbl">
+        <colgroup><col style="width:14%"><col style="width:36%"><col style="width:14%"><col style="width:36%"></colgroup>
+        <tbody>
+          <tr>
+            <th class="ct-vlabel" rowspan="3">임 차 인<br>(갑·신청인)</th>
+            <td><label style="font-size:10px; color:#555;">회사명</label><input class="ct-input ed" data-field="company_snapshot" value="${escapeAttr(ct.company_snapshot)}"></td>
+            <th>대표자</th>
+            <td><input class="ct-input ed" data-field="contact_name_snapshot" value="${escapeAttr(ct.contact_name_snapshot)}"></td>
+          </tr>
+          <tr>
+            <th>사업자번호</th>
+            <td><input class="ct-input ed" data-field="biz_no_snapshot" value="${escapeAttr(ct.biz_no_snapshot)}"></td>
+            <th>전화</th>
+            <td><input class="ct-input ed" data-field="phone_snapshot" value="${escapeAttr(ct.phone_snapshot)}"></td>
+          </tr>
+          <tr>
+            <th>주소</th>
+            <td colspan="3"><input class="ct-input ed" data-field="address_snapshot" value="${escapeAttr(ct.address_snapshot)}"></td>
+          </tr>
+          <tr>
+            <th class="ct-vlabel" rowspan="2">임 대 인<br>(을·공급자)</th>
+            <td><label style="font-size:10px; color:#555;">상호</label> ${escapeHtml(SUPPLIER_INFO.company)}</td>
+            <th>대표자</th>
+            <td>${escapeHtml(SUPPLIER_INFO.ceo)}</td>
+          </tr>
+          <tr>
+            <th>사업자번호</th>
+            <td>${escapeHtml(SUPPLIER_INFO.biz_no)}</td>
+            <th>전화 · 주소</th>
+            <td>${escapeHtml(SUPPLIER_INFO.phone)} · ${escapeHtml(SUPPLIER_INFO.address)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="ct-preset-row no-print">
+        <strong>품목 프리셋:</strong>
+        <select id="ct-preset-pick">
+          <option value="">선택…</option>
+          ${Object.keys(PRESETS).map(k => `<option value="${escapeAttr(k)}">${escapeHtml(k)}</option>`).join('')}
+        </select>
+        <button class="btn small" id="ct-add-row">+ 빈 행 추가</button>
+      </div>
+
+      <div class="section-title">렌 탈 물 품</div>
+      <table class="ct-tbl ct-tbl-items">
+        <colgroup>
+          <col style="width:18%"><col style="width:8%"><col style="width:8%">
+          <col style="width:8%"><col style="width:8%"><col style="width:7%">
+          <col style="width:13%"><col style="width:13%"><col style="width:11%"><col style="width:6%">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>모델</th><th>기본(흑)</th><th>기본(컬)</th>
+            <th>추가단가(흑)</th><th>추가단가(컬)</th><th>수량</th>
+            <th>월 렌탈료</th><th>소계</th><th>비고</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="ct-items-body">
+          ${renderItemRows()}
+        </tbody>
+      </table>
+
+      <div class="ct-total-box">
+        <div class="ct-total-cell"><label>소계 (VAT별도)</label><div class="v" id="ct-sub">0</div></div>
+        <div class="ct-total-cell"><label>VAT 10%</label><div class="v" id="ct-vat">0</div></div>
+        <div class="ct-total-cell total"><label>합계금액 (VAT포함)</label><div class="v" id="ct-total">0</div></div>
+      </div>
+
+      <div class="section-title">계 약 조 건</div>
+      <table class="ct-tbl">
+        <colgroup><col style="width:14%"><col style="width:36%"><col style="width:14%"><col style="width:36%"></colgroup>
+        <tbody>
+          <tr>
+            <th>계약기간(년)</th>
+            <td><input type="number" class="ct-input ed" data-field="period_years" value="${escapeAttr(ct.period_years)}" min="1" max="10" style="width:60px;"> 년</td>
+            <th>계약기간</th>
+            <td>
+              <input type="date" class="ct-input ed" data-field="period_start" value="${escapeAttr(ct.period_start)}" style="width:46%;">
+              ~
+              <input type="date" class="ct-input ed" data-field="period_end" value="${escapeAttr(ct.period_end)}" style="width:46%;">
+            </td>
+          </tr>
+          <tr>
+            <th>보증금 (원)</th>
+            <td><input type="number" class="ct-input ed num" data-field="deposit" value="${escapeAttr(ct.deposit || 0)}"> <span class="muted-small" id="ct-deposit-hint">(월세×2 자동 제안)</span></td>
+            <th>설치비 (원)</th>
+            <td><input type="number" class="ct-input ed num" data-field="install_fee" value="${escapeAttr(ct.install_fee || 0)}"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="page-footer">- 1 -</div>
+    </section>
+  `;
+}
+
+function renderItemRows() {
+  const items = CT_STATE.contract.items || [];
+  if (!items.length) {
+    return `<tr><td colspan="10" style="text-align:center; color:#888; padding:14px;">상단 "품목 프리셋" 에서 선택하거나 "+ 빈 행 추가" 를 눌러 품목을 추가하세요.</td></tr>`;
+  }
+  return items.map((r, i) => {
+    const fixed = !!r.fixed_quota;
+    const dis = fixed ? 'disabled' : '';
+    const sub = calcRowTotal(r);
+    return `
+      <tr data-row="${i}">
+        <td><input class="ct-input ed" data-row-field="model" value="${escapeAttr(r.model || '')}" placeholder="${escapeAttr(r._preset || '모델')}"></td>
+        <td><input type="number" class="ct-input ed num" data-row-field="bw_free" value="${escapeAttr(r.bw_free ?? 0)}" ${dis}></td>
+        <td><input type="number" class="ct-input ed num" data-row-field="co_free" value="${escapeAttr(r.co_free ?? 0)}" ${dis}></td>
+        <td><input type="number" class="ct-input ed num" data-row-field="bw_rate" value="${escapeAttr(r.bw_rate ?? 0)}" ${dis}></td>
+        <td><input type="number" class="ct-input ed num" data-row-field="co_rate" value="${escapeAttr(r.co_rate ?? 0)}" ${dis}></td>
+        <td><input type="number" class="ct-input ed qty" data-row-field="qty" value="${escapeAttr(r.qty ?? 1)}" min="1"></td>
+        <td><input type="number" class="ct-input ed num" data-row-field="monthly_fee" value="${escapeAttr(r.monthly_fee ?? 0)}"></td>
+        <td style="text-align:right;" class="ct-row-sub">${sub.toLocaleString()}</td>
+        <td><input class="ct-input ed" data-row-field="note" value="${escapeAttr(r.note || '')}"></td>
+        <td><button type="button" class="ct-row-del" data-row-del="${i}" title="행 삭제">×</button></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// ── 페이지 2: 이용약관 ────────────────────────────────
+function renderPage2() {
+  const ct = CT_STATE.contract;
+  return `
+    <section class="contract-page">
+      <div class="ct-page-title">이 용 약 관</div>
+      <p class="ct-terms-pre">
+        본 임대(렌탈) 계약을 체결함에 있어 임대인 <span class="ct-pre-company">${escapeHtml(SUPPLIER_INFO.company)}</span> 와(과)
+        임차인 <span class="ct-pre-company">${escapeHtml(ct.company_snapshot)}</span> 은(는) 아래 약관을 성실히 준수한다.
+      </p>
+
+      <div id="ct-terms-list">
+        ${renderTermRows(ct.terms)}
+      </div>
+
+      <div style="margin-top:10px;" class="no-print">
+        <button class="btn small" id="ct-term-add">+ 조항 추가</button>
+      </div>
+      <div class="page-footer">- 2 -</div>
+    </section>
+  `;
+}
+
+// ── 페이지 3: 부가사항 ────────────────────────────────
+function renderPage3() {
+  const ct = CT_STATE.contract;
+  return `
+    <section class="contract-page">
+      <div class="ct-page-title">부 가 사 항 · 특 약</div>
+
+      <h4>부가사항</h4>
+      <div id="ct-extras-list">
+        ${renderExtraRows(ct.extras)}
+      </div>
+      <div style="margin-top:6px;" class="no-print">
+        <button class="btn small" id="ct-extra-add">+ 부가사항 추가</button>
+      </div>
+
+      <h4 style="margin-top:14px;">특약 (자유 기재)</h4>
+      <textarea id="ct-special" placeholder="필요 시 특약사항을 입력하세요." style="width:100%; min-height:80px; padding:8px 10px; border:1px solid #ccc; border-radius:5px; font-size:11.5px; font-family:inherit; resize:vertical;">${escapeHtml(ct.special_terms || '')}</textarea>
+
+      <div style="margin-top:18px;">
+        <p style="font-size:11.5px;">위 약관 및 부가사항에 대해 양 당사자가 충분히 협의·확인하였으며, 계약 체결에 동의함.</p>
+        <div class="ct-date-line">
+          계약일자: <input type="date" class="ct-input ed date" data-field="contract_date_dup" value="${escapeAttr(ct.contract_date)}">
+        </div>
+      </div>
+
+      <div class="page-footer">- 3 -</div>
+    </section>
+  `;
+}
+
+function renderTermRows(terms) {
+  if (!terms || !terms.length) {
+    return `<p class="muted" style="font-size:11px;">약관이 비어 있습니다.</p>`;
+  }
+  return terms.map((t, i) => `
+    <div class="ct-term-row" data-term="${i}">
+      <div class="ct-term-no">제 <input type="number" min="1" data-term-field="article" value="${escapeAttr(t.article)}" style="width:34px; padding:2px 4px; border:1px solid #ccc; border-radius:3px;"> 조</div>
+      <div>
+        <div class="ct-term-tt"><input type="text" data-term-field="title" value="${escapeAttr(t.title)}" placeholder="조항 제목" style="padding:3px 6px; border:1px solid #ccc; border-radius:3px;"></div>
+        <textarea data-term-field="body" placeholder="조항 본문">${escapeHtml(t.body)}</textarea>
+      </div>
+      <div class="ct-term-chk">
+        <label class="chk"><input type="checkbox" data-term-field="confirmed" ${t.confirmed ? 'checked' : ''}> 확인함</label>
+      </div>
+      <div class="ct-term-rm no-print"><button type="button" data-term-del="${i}" title="삭제">×</button></div>
+    </div>
+  `).join('');
+}
+
+function renderExtraRows(extras) {
+  if (!extras || !extras.length) {
+    return `<p class="muted" style="font-size:11px;">부가사항이 없습니다.</p>`;
+  }
+  return extras.map((e, i) => `
+    <div class="ct-term-row" data-extra="${i}">
+      <div class="ct-term-no">${i + 1}.</div>
+      <div>
+        <textarea data-extra-field="text">${escapeHtml(e.text)}</textarea>
+      </div>
+      <div class="ct-term-chk">
+        <label class="chk"><input type="checkbox" data-extra-field="confirmed" ${e.confirmed ? 'checked' : ''}> 확인함</label>
+      </div>
+      <div class="ct-term-rm no-print"><button type="button" data-extra-del="${i}" title="삭제">×</button></div>
+    </div>
+  `).join('');
+}
+
+// ── 페이지 4: 자동출금 신청서 + 서명 ─────────────────
+function renderPage4() {
+  const ct = CT_STATE.contract;
+  const pm = ct.payment_method || 'account';
+  const acc = ct.payment_info?.account || {};
+  const card = ct.payment_info?.card || {};
+
+  return `
+    <section class="contract-page ct-cms-page">
+      <div class="ct-page-title">자동출금 이용 신청서</div>
+
+      <div class="ct-cms-section">신청인 정보</div>
+      <table class="ct-tbl">
+        <colgroup><col style="width:14%"><col style="width:36%"><col style="width:14%"><col style="width:36%"></colgroup>
+        <tbody>
+          <tr>
+            <th>회사명</th>
+            <td><input class="ct-input ed" data-field="company_snapshot" value="${escapeAttr(ct.company_snapshot)}"></td>
+            <th>대표자/담당자</th>
+            <td><input class="ct-input ed" data-field="contact_name_snapshot" value="${escapeAttr(ct.contact_name_snapshot)}"></td>
+          </tr>
+          <tr>
+            <th>전화</th>
+            <td><input class="ct-input ed" data-field="phone_snapshot" value="${escapeAttr(ct.phone_snapshot)}"></td>
+            <th>이메일</th>
+            <td><input class="ct-input ed" data-field="email_snapshot" value="${escapeAttr(ct.email_snapshot)}"></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="ct-cms-section" style="margin-top:14px;">결제 수단 선택</div>
+      <div class="ct-cms-paymethod" style="margin-bottom:10px; font-size:12px;">
+        <label style="margin-right:18px; cursor:pointer;">
+          <input type="radio" name="ct-pay" value="account" ${pm === 'account' ? 'checked' : ''}> ⚪ 예금계좌
+        </label>
+        <label style="cursor:pointer;">
+          <input type="radio" name="ct-pay" value="card"    ${pm === 'card' ? 'checked' : ''}> ⚪ 신용카드
+        </label>
+      </div>
+
+      <div class="ct-pay-block ${pm === 'account' ? '' : 'disabled'}" id="ct-pay-account">
+        <h5>예금계좌 자동이체</h5>
+        <div class="ct-pay-grid">
+          <div><label>은행</label><input data-pay-acc="bank"        value="${escapeAttr(acc.bank || '')}"></div>
+          <div><label>계좌번호</label><input data-pay-acc="account_no" value="${escapeAttr(acc.account_no || '')}"></div>
+          <div><label>예금주</label><input data-pay-acc="holder"      value="${escapeAttr(acc.holder || '')}"></div>
+          <div><label>사업자번호/생년월일</label><input data-pay-acc="biz_no" value="${escapeAttr(acc.biz_no || '')}"></div>
+          <div><label>출금 약정일</label><input type="number" data-pay-acc="draft_day" value="${escapeAttr(acc.draft_day ?? 25)}" min="1" max="31"></div>
+        </div>
+      </div>
+
+      <div class="ct-pay-block ${pm === 'card' ? '' : 'disabled'}" id="ct-pay-card">
+        <h5>신용카드 자동결제</h5>
+        <div class="ct-pay-grid">
+          <div><label>카드사</label><input data-pay-card="card_brand" value="${escapeAttr(card.card_brand || '')}"></div>
+          <div><label>카드번호</label><input data-pay-card="card_no"    value="${escapeAttr(card.card_no || '')}"></div>
+          <div><label>유효기간 (MM/YY)</label><input data-pay-card="expiry" value="${escapeAttr(card.expiry || '')}"></div>
+          <div><label>소지자명</label><input data-pay-card="holder"     value="${escapeAttr(card.holder || '')}"></div>
+          <div><label>출금 약정일</label><input type="number" data-pay-card="draft_day" value="${escapeAttr(card.draft_day ?? 25)}" min="1" max="31"></div>
+        </div>
+      </div>
+
+      <div class="caution-text" style="margin-top:10px;">
+        본인은 위 결제수단으로 매월 자동출금되는 임대료 및 부대비용 청구에 동의하며, 사실과 다르거나 결제 실패로 발생하는
+        모든 책임은 신청인에게 있음을 확인합니다.
+      </div>
+
+      <div class="ct-sign-wrap">
+        <div class="ct-sign-box">
+          <div class="ct-sign-label">
+            <span>공급자 (한별시스템) 서명</span>
+            <button type="button" class="ct-sign-clear no-print" data-sign-clear="supplier">✏ 다시 그리기</button>
+          </div>
+          <canvas class="ct-sign-canvas" id="ct-sign-supplier" data-sign-pad="supplier"></canvas>
+        </div>
+        <div class="ct-sign-box">
+          <div class="ct-sign-label">
+            <span>신청인 서명</span>
+            <button type="button" class="ct-sign-clear no-print" data-sign-clear="applicant">✏ 다시 그리기</button>
+          </div>
+          <canvas class="ct-sign-canvas" id="ct-sign-applicant" data-sign-pad="applicant"></canvas>
+        </div>
+      </div>
+
+      <div class="page-footer">- 4 -</div>
+    </section>
+  `;
+}
+
+// ── 에디터 이벤트 바인딩 ───────────────────────────────
+function bindEditorEvents() {
+  const ct = CT_STATE.contract;
+  const body = document.getElementById('ct-edit-body');
+
+  // (1) 단일 필드 (data-field)
+  body.querySelectorAll('[data-field]').forEach(el => {
+    el.addEventListener('input', () => {
+      const f = el.dataset.field;
+      let v = el.value;
+      if (el.type === 'number') v = v === '' ? null : Number(v);
+      // contract_date_dup → contract_date 동기화
+      if (f === 'contract_date_dup') {
+        ct.contract_date = v;
+        // 헤더의 작성일 라벨/계약번호 반영 위해 헤더만 갱신
+        renderEditorHeader();
+        return;
+      }
+      ct[f] = v;
+      // period_years 변경 → 종료일 자동 재계산
+      if (f === 'period_years' && ct.period_start) {
+        const d = new Date(ct.period_start);
+        if (!isNaN(d)) {
+          d.setFullYear(d.getFullYear() + (Number(v) || 0));
+          ct.period_end = d.toISOString().slice(0, 10);
+          const endEl = body.querySelector('[data-field="period_end"]');
+          if (endEl) endEl.value = ct.period_end;
+        }
+      }
+      // period_start 변경 시 종료일 자동
+      if (f === 'period_start' && ct.period_years) {
+        const d = new Date(v);
+        if (!isNaN(d)) {
+          d.setFullYear(d.getFullYear() + (Number(ct.period_years) || 0));
+          ct.period_end = d.toISOString().slice(0, 10);
+          const endEl = body.querySelector('[data-field="period_end"]');
+          if (endEl) endEl.value = ct.period_end;
+        }
+      }
+      if (f === 'contract_date' || f === 'contract_no') {
+        renderEditorHeader();
+      }
+    });
+  });
+
+  // (2) 품목 행 (data-row-field)
+  body.querySelectorAll('[data-row-field]').forEach(el => {
+    el.addEventListener('input', () => {
+      const tr = el.closest('tr');
+      const i = Number(tr.dataset.row);
+      const f = el.dataset.rowField;
+      let v = el.value;
+      if (el.type === 'number') v = v === '' ? 0 : Number(v);
+      ct.items[i][f] = v;
+      if (f === 'qty' || f === 'monthly_fee') {
+        const sub = calcRowTotal(ct.items[i]);
+        const cell = tr.querySelector('.ct-row-sub');
+        if (cell) cell.textContent = sub.toLocaleString();
+        recalcTotals();
+      }
+    });
+  });
+
+  // 행 삭제
+  body.querySelectorAll('[data-row-del]').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = Number(b.dataset.rowDel);
+      ct.items.splice(i, 1);
+      refreshItemsTable();
+    });
+  });
+
+  // 프리셋 드롭다운
+  const preset = document.getElementById('ct-preset-pick');
+  if (preset) {
+    preset.addEventListener('change', () => {
+      const k = preset.value;
+      if (!k || !PRESETS[k]) return;
+      const row = { ...PRESETS[k], _preset: k };
+      ct.items.push(row);
+      // 레이저·복합기 → install_fee 자동 채움 (현재 비어있을 때만)
+      if ((k === '레이저' || k === '복합기') && (!ct.install_fee || ct.install_fee === 0)) {
+        ct.install_fee = 100000;
+        const ifEl = document.querySelector('[data-field="install_fee"]');
+        if (ifEl) ifEl.value = 100000;
+      }
+      preset.value = '';
+      refreshItemsTable();
+    });
+  }
+
+  // 빈 행 추가
+  const addRowBtn = document.getElementById('ct-add-row');
+  if (addRowBtn) {
+    addRowBtn.addEventListener('click', () => {
+      ct.items.push({ model: '', bw_free: 0, co_free: 0, bw_rate: 0, co_rate: 0, qty: 1, monthly_fee: 0, note: '' });
+      refreshItemsTable();
+    });
+  }
+
+  // (3) 약관 필드
+  body.querySelectorAll('[data-term-field]').forEach(el => {
+    el.addEventListener('input', () => {
+      const row = el.closest('[data-term]');
+      const i = Number(row.dataset.term);
+      const f = el.dataset.termField;
+      let v = el.value;
+      if (f === 'confirmed') v = el.checked;
+      else if (f === 'article') v = Number(v) || 0;
+      ct.terms[i][f] = v;
+    });
+    el.addEventListener('change', () => {
+      if (el.dataset.termField === 'confirmed') {
+        const row = el.closest('[data-term]');
+        ct.terms[Number(row.dataset.term)].confirmed = el.checked;
+      }
+    });
+  });
+
+  body.querySelectorAll('[data-term-del]').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = Number(b.dataset.termDel);
+      ct.terms.splice(i, 1);
+      document.getElementById('ct-terms-list').innerHTML = renderTermRows(ct.terms);
+      bindEditorEvents();
+    });
+  });
+
+  const termAdd = document.getElementById('ct-term-add');
+  if (termAdd) {
+    termAdd.addEventListener('click', () => {
+      const next = (ct.terms[ct.terms.length - 1]?.article || ct.terms.length) + 1;
+      ct.terms.push({ article: next, title: '신규 조항', body: '', confirmed: false });
+      document.getElementById('ct-terms-list').innerHTML = renderTermRows(ct.terms);
+      bindEditorEvents();
+    });
+  }
+
+  // (4) 부가사항
+  body.querySelectorAll('[data-extra-field]').forEach(el => {
+    el.addEventListener('input', () => {
+      const row = el.closest('[data-extra]');
+      const i = Number(row.dataset.extra);
+      const f = el.dataset.extraField;
+      ct.extras[i][f] = (f === 'confirmed') ? el.checked : el.value;
+    });
+    el.addEventListener('change', () => {
+      if (el.dataset.extraField === 'confirmed') {
+        const row = el.closest('[data-extra]');
+        ct.extras[Number(row.dataset.extra)].confirmed = el.checked;
+      }
+    });
+  });
+
+  body.querySelectorAll('[data-extra-del]').forEach(b => {
+    b.addEventListener('click', () => {
+      const i = Number(b.dataset.extraDel);
+      ct.extras.splice(i, 1);
+      document.getElementById('ct-extras-list').innerHTML = renderExtraRows(ct.extras);
+      bindEditorEvents();
+    });
+  });
+
+  const extraAdd = document.getElementById('ct-extra-add');
+  if (extraAdd) {
+    extraAdd.addEventListener('click', () => {
+      ct.extras.push({ text: '', confirmed: false });
+      document.getElementById('ct-extras-list').innerHTML = renderExtraRows(ct.extras);
+      bindEditorEvents();
+    });
+  }
+
+  // (5) 특약
+  const sp = document.getElementById('ct-special');
+  if (sp) sp.addEventListener('input', () => { ct.special_terms = sp.value; });
+
+  // (6) 결제수단 라디오
+  body.querySelectorAll('input[name="ct-pay"]').forEach(r => {
+    r.addEventListener('change', () => {
+      ct.payment_method = r.value;
+      document.getElementById('ct-pay-account').classList.toggle('disabled', r.value !== 'account');
+      document.getElementById('ct-pay-card').classList.toggle('disabled',    r.value !== 'card');
+    });
+  });
+
+  // (7) 결제정보 필드
+  body.querySelectorAll('[data-pay-acc]').forEach(el => {
+    el.addEventListener('input', () => {
+      const f = el.dataset.payAcc;
+      let v = el.value;
+      if (el.type === 'number') v = v === '' ? null : Number(v);
+      ct.payment_info.account = ct.payment_info.account || {};
+      ct.payment_info.account[f] = v;
+    });
+  });
+  body.querySelectorAll('[data-pay-card]').forEach(el => {
+    el.addEventListener('input', () => {
+      const f = el.dataset.payCard;
+      let v = el.value;
+      if (el.type === 'number') v = v === '' ? null : Number(v);
+      ct.payment_info.card = ct.payment_info.card || {};
+      ct.payment_info.card[f] = v;
+    });
+  });
+
+  // (8) 서명 초기화 버튼
+  body.querySelectorAll('[data-sign-clear]').forEach(b => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.signClear;
+      const pad = CT_STATE.signaturePads[k];
+      if (pad) pad.clear();
+      CT_STATE.contract[k === 'supplier' ? 'sign_supplier' : 'sign_applicant'] = '';
+    });
+  });
+}
+
+function renderEditorHeader() {
+  // 헤더만 살짝 갱신 (계약번호/작성일/회사명 동기화)
+  const ct = CT_STATE.contract; const cu = CT_STATE.customer;
+  const head = document.getElementById('ct-edit-head');
+  if (!head) return;
+  const meta = head.querySelector('.ct-h-meta');
+  if (meta) meta.textContent = `계약번호 ${ct.contract_no} · 작성 ${ct.contract_date}`;
+}
+
+// 행 테이블만 새로 렌더
+function refreshItemsTable() {
+  document.getElementById('ct-items-body').innerHTML = renderItemRows();
+  bindEditorEvents();
+  // 보증금 자동 제안 (사용자가 직접 수정 안 했을 때 — 빈 경우에만)
+  if (!CT_STATE.contract.deposit) {
+    const suggest = suggestDeposit(CT_STATE.contract.items);
+    if (suggest > 0) {
+      CT_STATE.contract.deposit = suggest;
+      const depEl = document.querySelector('[data-field="deposit"]');
+      if (depEl) depEl.value = suggest;
+    }
+  }
+  recalcTotals();
+}
+
+function recalcTotals() {
+  const g = calcGrand(CT_STATE.contract.items || []);
+  const subEl   = document.getElementById('ct-sub');
+  const vatEl   = document.getElementById('ct-vat');
+  const totalEl = document.getElementById('ct-total');
+  if (subEl)   subEl.textContent   = g.sub.toLocaleString();
+  if (vatEl)   vatEl.textContent   = g.vat.toLocaleString();
+  if (totalEl) totalEl.textContent = g.total.toLocaleString();
+}
+
+// ── 서명 패드 (Canvas) ─────────────────────────────────
+class SignaturePad {
+  constructor(canvas, onChange) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.drawing = false;
+    this.last = null;
+    this.empty = true;
+    this.onChange = onChange || (() => {});
+    this._setupSize();
+    this._bind();
+  }
+  _setupSize() {
+    // CSS 크기 → 실제 픽셀 (HiDPI 대응)
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    this.canvas.width  = rect.width  * dpr;
+    this.canvas.height = rect.height * dpr;
+    this.ctx.scale(dpr, dpr);
+    this.ctx.lineCap = 'round';
+    this.ctx.lineJoin = 'round';
+    this.ctx.strokeStyle = '#0b1220';
+    this.ctx.lineWidth = 2.2;
+  }
+  _pt(e) {
+    const r = this.canvas.getBoundingClientRect();
+    const cx = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+    const cy = (e.touches ? e.touches[0].clientY : e.clientY) - r.top;
+    return { x: cx, y: cy };
+  }
+  _bind() {
+    const start = (e) => {
+      e.preventDefault();
+      this.drawing = true;
+      this.empty = false;
+      this.last = this._pt(e);
+    };
+    const move = (e) => {
+      if (!this.drawing) return;
+      e.preventDefault();
+      const p = this._pt(e);
+      this.ctx.beginPath();
+      this.ctx.moveTo(this.last.x, this.last.y);
+      this.ctx.lineTo(p.x, p.y);
+      this.ctx.stroke();
+      this.last = p;
+    };
+    const end = (e) => {
+      if (!this.drawing) return;
+      this.drawing = false;
+      this.onChange(this.toDataURL());
+    };
+    this.canvas.addEventListener('mousedown', start);
+    this.canvas.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', end);
+    this.canvas.addEventListener('touchstart', start, { passive: false });
+    this.canvas.addEventListener('touchmove',  move,  { passive: false });
+    this.canvas.addEventListener('touchend',   end);
+  }
+  clear() {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.empty = true;
+    this.onChange('');
+  }
+  toDataURL() {
+    if (this.empty) return '';
+    return this.canvas.toDataURL('image/png');
+  }
+  fromDataURL(url) {
+    if (!url) { this.clear(); return; }
+    const img = new Image();
+    img.onload = () => {
+      const r = this.canvas.getBoundingClientRect();
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      this.ctx.drawImage(img, 0, 0, r.width, r.height);
+      this.empty = false;
+    };
+    img.src = url;
+  }
+}
+
+function initSignaturePads() {
+  const supCv = document.getElementById('ct-sign-supplier');
+  const appCv = document.getElementById('ct-sign-applicant');
+  if (!supCv || !appCv) return;
+  const ct = CT_STATE.contract;
+  const supPad = new SignaturePad(supCv, (data) => { ct.sign_supplier  = data; });
+  const appPad = new SignaturePad(appCv, (data) => { ct.sign_applicant = data; });
+  CT_STATE.signaturePads = { supplier: supPad, applicant: appPad };
+  if (ct.sign_supplier)  supPad.fromDataURL(ct.sign_supplier);
+  if (ct.sign_applicant) appPad.fromDataURL(ct.sign_applicant);
+}
+
+// ── 저장 / 삭제 ────────────────────────────────────────
+async function saveContract() {
+  const ct = CT_STATE.contract;
+  const supa = window.totalasAuth;
+  if (!supa) { toast('인증이 준비되지 않았습니다.', 'err'); return; }
+
+  // 최신 서명 데이터 동기화 (간혹 onChange 누락 대비)
+  if (CT_STATE.signaturePads.supplier)  ct.sign_supplier  = CT_STATE.signaturePads.supplier.toDataURL()  || ct.sign_supplier  || '';
+  if (CT_STATE.signaturePads.applicant) ct.sign_applicant = CT_STATE.signaturePads.applicant.toDataURL() || ct.sign_applicant || '';
+
+  if ((ct.status === 'signed' || ct.status === 'active') && !ct.signed_at) {
+    ct.signed_at = new Date().toISOString();
+  }
+
+  const payload = {
+    id: ct.id,
+    customer_id: ct.customer_id,
+    contract_no: ct.contract_no,
+    contract_date: ct.contract_date,
+    period_years: ct.period_years,
+    period_start: ct.period_start,
+    period_end:   ct.period_end,
+    deposit:      ct.deposit,
+    install_fee:  ct.install_fee,
+    company_snapshot:      ct.company_snapshot,
+    contact_name_snapshot: ct.contact_name_snapshot,
+    biz_no_snapshot:       ct.biz_no_snapshot,
+    address_snapshot:      ct.address_snapshot,
+    phone_snapshot:        ct.phone_snapshot,
+    email_snapshot:        ct.email_snapshot,
+    items:         ct.items || [],
+    terms:         ct.terms || [],
+    extras:        ct.extras || [],
+    special_terms: ct.special_terms || null,
+    payment_method: ct.payment_method || 'account',
+    payment_info:   ct.payment_info || {},
+    sign_supplier:  ct.sign_supplier  || null,
+    sign_applicant: ct.sign_applicant || null,
+    signed_at:      ct.signed_at,
+    status:         ct.status || 'draft',
+    notes:          ct.notes || null,
+    updated_at:     new Date().toISOString(),
+  };
+
+  try {
+    const { error } = await supa.from('rental_contracts').upsert(payload);
+    if (error) throw error;
+    toast('계약서가 저장되었습니다.', 'ok');
+    ct._existing = true;
+    // 거래처별 리스트 새로고침 + 상세 패널 갱신
+    await loadContractsFor(ct.customer_id);
+    renderDetail();
+  } catch (err) {
+    console.error(err);
+    toast('저장 실패: ' + (err.message || err), 'err');
+  }
+}
+
+async function deleteContract() {
+  const ct = CT_STATE.contract;
+  if (!ct || !ct.id) return;
+  if (!confirm(`계약서 ${ct.contract_no} 을(를) 삭제하시겠습니까?`)) return;
+  try {
+    const { error } = await window.totalasAuth.from('rental_contracts').delete().eq('id', ct.id);
+    if (error) throw error;
+    toast('계약서가 삭제되었습니다.', 'ok');
+    closeContractEditor();
+    await loadContractsFor(ct.customer_id);
+    renderDetail();
+  } catch (err) {
+    console.error(err);
+    toast('삭제 실패: ' + (err.message || err), 'err');
+  }
+}
+
+// ── 상세 패널 hook (renderDetail 후처리) ─────────────
+const _originalRenderDetail = renderDetail;
+renderDetail = function () {
+  _originalRenderDetail();
+  const c = STATE.customers.find(x => x.id === STATE.selectedId);
+  if (!c) return;
+
+  // 계약서 카드를 우측 상세 패널 끝에 삽입
+  const detail = document.getElementById('rc-detail');
+  const ctCardHTML = renderContractCard(c);
+  detail.insertAdjacentHTML('beforeend', ctCardHTML);
+
+  // 이벤트 바인딩
+  const newBtn = document.getElementById('btn-ct-new');
+  if (newBtn) newBtn.addEventListener('click', () => openContractEditor(c, null));
+
+  detail.querySelectorAll('.rc-ct-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const ctid = row.dataset.ctid;
+      const existing = (CT_STATE.byCustomer[c.id] || []).find(x => x.id === ctid);
+      if (!existing) return;
+      const ctCopy = JSON.parse(JSON.stringify(existing));
+      ctCopy._existing = true;
+      openContractEditor(c, ctCopy);
+    });
+  });
+
+  // 계약서 비동기 로드 (없을 때만)
+  if (!CT_STATE.byCustomer[c.id]) {
+    loadContractsFor(c.id).then(() => renderDetail());
+  }
+};
+
+// ── 에디터 모달 닫기 (ESC / backdrop) ────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('ct-edit-backdrop')?.classList.contains('show')) {
+    closeContractEditor();
+  }
+});
+document.addEventListener('click', (e) => {
+  if (e.target && e.target.id === 'ct-edit-backdrop') closeContractEditor();
+});
