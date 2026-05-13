@@ -882,25 +882,66 @@ const PRESETS = {
   'NAS':      { model: '',  bw_free: 0,    co_free: 0,   bw_rate: 0,  co_rate: 0,   qty: 1, monthly_fee: 0,     fixed_quota: true  },
 };
 
-// 기본 약관 (제1~10조)
+// 기본 약관 (제1~10조) — 한별시스템 임대 표준약관
 const DEFAULT_TERMS = [
-  { article: 1,  title: '목적',           body: '임대인(공급자, 한별시스템)은 임차인(신청인)에게 본 계약 물품을 임대하고, 임차인은 이에 대한 월 렌탈료 및 추가 사용료를 지급한다.', confirmed: false },
-  { article: 2,  title: '계약기간',       body: '본 계약의 기간은 위 표에 기재된 시작일부터 종료일까지로 하며, 기간 만료 1개월 전까지 별도의 의사표시가 없을 경우 동일 조건으로 1년 단위 자동 갱신된다.', confirmed: false },
-  { article: 3,  title: '설치 및 철거',   body: '레이저 프린터·디지털 복합기의 설치비 100,000원, 철거비 100,000원, 등록비 200,000원이 별도로 부과된다. 잉크젯·PC·모니터·웰리스 제균기·NAS는 설치비 무료를 원칙으로 한다.', confirmed: false },
-  { article: 4,  title: '소유권',         body: '임대 물품의 소유권은 임대인(한별시스템)에게 있으며, 임차인은 임대 물품에 대한 어떠한 형태의 양도·전대·담보 제공도 할 수 없다.', confirmed: false },
-  { article: 5,  title: '소모품 및 유지보수', body: '토너·잉크·필터 등 표준 소모품은 임대인이 무상 공급하며, 정기 유지보수(AS) 또한 임대인 책임 하에 수행된다. 단, 임차인의 고의·과실로 인한 부품 손상은 별도 청구된다.', confirmed: false },
-  { article: 6,  title: '대금 지급',      body: '월 렌탈료 및 추가 사용료(카운터 점검 후 청구분 포함)는 매월 25일(약정일) 자동이체로 출금된다. 결제 실패 시 즉시 통보하여 차회 합산 출금된다.', confirmed: false },
-  { article: 7,  title: '보증금',         body: '보증금은 월 렌탈료(VAT 포함)의 2개월치를 원칙으로 하며, 계약 정상 종료 후 물품 회수·정상 반납 확인을 거쳐 7일 이내 반환한다.', confirmed: false },
-  { article: 8,  title: '계약해지',       body: '월 렌탈료가 3개월 이상 미납되거나 본 계약을 중대하게 위반한 경우, 임대인은 별도의 최고 없이 본 계약을 일방적으로 해지할 수 있다.', confirmed: false },
-  { article: 9,  title: '손해배상',       body: '임차인의 고의·과실로 인하여 임대 물품이 파손·분실되거나 회수가 불가능한 경우, 잔여 임대료 및 물품 잔존가액을 임차인이 별도로 배상한다.', confirmed: false },
-  { article: 10, title: '분쟁해결',       body: '본 계약의 해석 및 이행에 관한 분쟁은 양 당사자가 협의하여 해결하되, 협의 불가 시 대구지방법원을 1심 관할법원으로 한다.', confirmed: false },
+  {
+    article: 1, title: '계약의 목적',
+    body: '임대인 한별시스템(이하 "을")은 임차인(이하 "갑")에게 본 계약서에 명시된 임대 물품(이하 "물품")을 임대하고, 갑은 이를 임차하여 사용한다.',
+    confirmed: true,
+  },
+  {
+    article: 2, title: '계약기간 및 갱신',
+    body: '1. 계약기간은 본 계약서 표지에 명시된 기간으로 한다.\n2. 기간 만료 1개월 전까지 양 당사자 어느 일방의 서면 해지 의사 표시가 없으면 동일 조건으로 1년씩 자동 갱신된다.',
+    confirmed: true,
+  },
+  {
+    article: 3, title: '인도 및 설치',
+    body: '1. 을은 갑이 지정한 장소에 물품을 설치한다.\n2. 설치비 및 철거비 부과 기준:\n   - 잉크젯: 무료\n   - 레이저·디지털복합기: 설치비 100,000원, 철거비 100,000원, 등록비 200,000원\n   - PC·모니터·웰리스·NAS: 설치비 무료 (출장비 별도)\n3. 설치 후 양 당사자가 함께 점검하며 갑은 인수 확인서에 서명한다.',
+    confirmed: true,
+  },
+  {
+    article: 4, title: '사용 및 관리',
+    body: '1. 갑은 본 물품을 임대 목적 외에 사용하거나 제3자에게 양도·전대·담보 제공할 수 없다.\n2. 갑은 선량한 관리자의 주의로 물품을 사용·보관해야 한다.\n3. 갑의 고의 또는 중과실로 인한 손상은 갑이 수리비를 부담한다.',
+    confirmed: true,
+  },
+  {
+    article: 5, title: '소모품 및 유지보수',
+    body: '1. 토너·잉크·부속품 등 정상 사용 시 발생하는 소모품은 을이 무상 공급한다.\n2. 정기 점검은 을의 일정에 따라 주기적으로 시행한다.\n3. 고장 신고 시 영업일 기준 24시간 이내 출장·수리한다. 단, 갑의 부주의 또는 불법 사용으로 인한 고장은 갑이 비용을 부담한다.',
+    confirmed: true,
+  },
+  {
+    article: 6, title: '월 임대료 지급',
+    body: '1. 갑은 매월 자동이체 약정일에 본 계약서 표지의 월 임대료(VAT 포함)를 을의 지정 계좌로 납부한다.\n2. 추가 매수 발생 시 추가 단가에 따라 다음 달 임대료에 합산하여 청구한다.\n3. 자동이체 실패 시 갑은 7일 이내 직접 납부하며, 이를 초과할 경우 연 20%의 연체이자가 가산된다.',
+    confirmed: true,
+  },
+  {
+    article: 7, title: '보증금',
+    body: '1. 보증금은 월 임대료의 2개월치를 기준으로 한다.\n2. 보증금은 계약 해지 시 미수금 및 손해배상을 차감한 후 반환한다.',
+    confirmed: true,
+  },
+  {
+    article: 8, title: '계약 해지',
+    body: '1. 다음 사유 발생 시 을은 사전 통보 없이 계약을 해지할 수 있다.\n   - 월 임대료 3개월 이상 미납\n   - 임대 물품의 무단 양도·전대·담보 제공\n   - 임차인의 파산·해산·영업 중단\n2. 갑이 약정 기간 내 일방 해지 시 잔여 기간의 50%에 해당하는 위약금을 부담한다.',
+    confirmed: true,
+  },
+  {
+    article: 9, title: '손해배상',
+    body: '1. 갑의 고의 또는 중과실로 인한 물품 손상·분실 시 갑이 시가로 변상한다.\n2. 천재지변·화재 등 불가항력으로 인한 손상은 양 당사자가 협의한다.',
+    confirmed: true,
+  },
+  {
+    article: 10, title: '분쟁의 해결',
+    body: '1. 본 계약과 관련하여 발생하는 분쟁은 양 당사자가 협의로 해결한다.\n2. 협의가 이루어지지 않을 경우 대구지방법원을 1심 관할 법원으로 한다.',
+    confirmed: true,
+  },
 ];
 
 const DEFAULT_EXTRAS = [
-  { text: '카운터 점검 후 산정된 추가 출력료(흑백·컬러)는 익월 자동이체로 합산 청구된다.',         confirmed: false },
-  { text: '임대 물품의 양도·전대·담보 제공을 금지한다.',                                            confirmed: false },
-  { text: '사업장 이전 시 30일 전 임대인에게 통보하여야 하며, 이전 설치비는 임차인이 부담한다.',   confirmed: false },
-  { text: '계약 종료 시 임차인은 물품을 정상 상태로 반납하여야 하며, 회수 후 보증금이 반환된다.', confirmed: false },
+  { text: '카운터 점검 후 발생한 추가 요금은 다음 달 자동이체로 합산 청구된다.', confirmed: true },
+  { text: '사업장 이전 시 30일 전 서면 통보하며, 이전 설치비 100,000원은 갑이 부담한다.', confirmed: true },
+  { text: '임대 기간 중 모델 교체가 필요한 경우 양 당사자 협의로 처리한다.', confirmed: true },
+  { text: '계약 종료 시 갑은 물품을 원상태로 반납하며, 정상 반납 확인 후 보증금이 반환된다.', confirmed: true },
+  { text: '본 계약서에 명시되지 않은 사항은 일반 상관례 및 한별시스템 임대 표준약관에 따른다.', confirmed: true },
 ];
 
 // 편집 중인 계약서 상태
@@ -945,6 +986,9 @@ function newContractDraft(customer) {
     },
     sign_supplier: '',
     sign_applicant: '',
+    signature_type: 'digital',   // 'digital' | 'stamp' | 'none'
+    contract_scan_path: '',      // Supabase storage path (도장 모드 — 계약서 스캔본)
+    id_card_path: '',            // Supabase storage path (도장 모드 — 신분증 사진)
     signed_at: null,
     status: 'draft',
     notes: '',
@@ -1070,10 +1114,13 @@ function renderContractEditor() {
         <option value="active"    ${ct.status === 'active'     ? 'selected' : ''}>진행중</option>
         <option value="terminated"${ct.status === 'terminated' ? 'selected' : ''}>해지</option>
       </select>
-      <button class="btn small" id="ct-btn-print">🖨 인쇄</button>
+      <button class="btn small" id="ct-btn-print" title="계약서·약관 2매 + 자동이체 1매 = 총 7페이지">🖨 인쇄 (7매)</button>
       <button class="btn small primary" id="ct-btn-save">💾 저장</button>
       ${ct._existing ? `<button class="btn small danger" id="ct-btn-delete">🗑 삭제</button>` : ''}
       <button class="btn small ghost" id="ct-btn-close">✕ 닫기</button>
+    </div>
+    <div style="flex-basis:100%; font-size:11px; color:#64748b; margin-top:2px;">
+      🖨 인쇄 → 계약서·약관 갑·을 2매 + 자동이체 1매 = 총 7페이지
     </div>
   `;
 
@@ -1093,7 +1140,7 @@ function renderContractEditor() {
   // 헤더 액션
   document.getElementById('ct-h-status').addEventListener('change', (e) => { ct.status = e.target.value; });
   document.getElementById('ct-btn-close').addEventListener('click', closeContractEditor);
-  document.getElementById('ct-btn-print').addEventListener('click', () => window.print());
+  document.getElementById('ct-btn-print').addEventListener('click', printContractMulti);
   document.getElementById('ct-btn-save').addEventListener('click', saveContract);
   const delBtn = document.getElementById('ct-btn-delete');
   if (delBtn) delBtn.addEventListener('click', deleteContract);
@@ -1107,7 +1154,7 @@ function renderContractEditor() {
 function renderPage1() {
   const ct = CT_STATE.contract;
   return `
-    <section class="contract-page">
+    <section class="contract-page" data-page="1">
       <div class="ct-cover-head">
         <div class="ct-cover-title">임대(렌탈) 계약서</div>
         <div class="ct-cover-company" style="text-align:right; font-size:12px;">
@@ -1239,37 +1286,49 @@ function renderItemRows() {
   }).join('');
 }
 
-// ── 페이지 2: 이용약관 ────────────────────────────────
+// ── 페이지 2: 이용약관 (제1~5조 전반) ────────────────
 function renderPage2() {
   const ct = CT_STATE.contract;
+  const allTerms = ct.terms || [];
+  // 제1~5조 (article <= 5)
+  const front = allTerms.filter(t => Number(t.article) <= 5);
   return `
-    <section class="contract-page">
-      <div class="ct-page-title">이 용 약 관</div>
+    <section class="contract-page" data-page="2">
+      <div class="ct-page-title">이 용 약 관 (전반)</div>
       <p class="ct-terms-pre">
         본 임대(렌탈) 계약을 체결함에 있어 임대인 <span class="ct-pre-company">${escapeHtml(SUPPLIER_INFO.company)}</span> 와(과)
         임차인 <span class="ct-pre-company">${escapeHtml(ct.company_snapshot)}</span> 은(는) 아래 약관을 성실히 준수한다.
       </p>
 
-      <div id="ct-terms-list">
-        ${renderTermRows(ct.terms)}
+      <div id="ct-terms-list-front">
+        ${renderTermRows(front, 0)}
       </div>
 
-      <div style="margin-top:10px;" class="no-print">
-        <button class="btn small" id="ct-term-add">+ 조항 추가</button>
-      </div>
       <div class="page-footer">- 2 -</div>
     </section>
   `;
 }
 
-// ── 페이지 3: 부가사항 ────────────────────────────────
+// ── 페이지 3: 이용약관 (제6~10조 후반) + 부가사항 + 특약 ─
 function renderPage3() {
   const ct = CT_STATE.contract;
+  const allTerms = ct.terms || [];
+  // 제6조 이상
+  const backStart = allTerms.findIndex(t => Number(t.article) >= 6);
+  const back = backStart >= 0 ? allTerms.slice(backStart) : [];
   return `
-    <section class="contract-page">
-      <div class="ct-page-title">부 가 사 항 · 특 약</div>
+    <section class="contract-page" data-page="3">
+      <div class="ct-page-title">이 용 약 관 (후반) · 부 가 사 항 · 특 약</div>
 
-      <h4>부가사항</h4>
+      <div id="ct-terms-list-back">
+        ${renderTermRows(back, backStart >= 0 ? backStart : 0)}
+      </div>
+
+      <div style="margin-top:10px;" class="no-print">
+        <button class="btn small" id="ct-term-add">+ 조항 추가</button>
+      </div>
+
+      <h4 style="margin-top:14px;">부가사항</h4>
       <div id="ct-extras-list">
         ${renderExtraRows(ct.extras)}
       </div>
@@ -1292,12 +1351,15 @@ function renderPage3() {
   `;
 }
 
-function renderTermRows(terms) {
+function renderTermRows(terms, baseIndex) {
+  const base = Number(baseIndex) || 0;
   if (!terms || !terms.length) {
     return `<p class="muted" style="font-size:11px;">약관이 비어 있습니다.</p>`;
   }
-  return terms.map((t, i) => `
-    <div class="ct-term-row" data-term="${i}">
+  return terms.map((t, i) => {
+    const realIdx = base + i;
+    return `
+    <div class="ct-term-row" data-term="${realIdx}">
       <div class="ct-term-no">제 <input type="number" min="1" data-term-field="article" value="${escapeAttr(t.article)}" style="width:34px; padding:2px 4px; border:1px solid #ccc; border-radius:3px;"> 조</div>
       <div>
         <div class="ct-term-tt"><input type="text" data-term-field="title" value="${escapeAttr(t.title)}" placeholder="조항 제목" style="padding:3px 6px; border:1px solid #ccc; border-radius:3px;"></div>
@@ -1306,9 +1368,10 @@ function renderTermRows(terms) {
       <div class="ct-term-chk">
         <label class="chk"><input type="checkbox" data-term-field="confirmed" ${t.confirmed ? 'checked' : ''}> 확인함</label>
       </div>
-      <div class="ct-term-rm no-print"><button type="button" data-term-del="${i}" title="삭제">×</button></div>
+      <div class="ct-term-rm no-print"><button type="button" data-term-del="${realIdx}" title="삭제">×</button></div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 }
 
 function renderExtraRows(extras) {
@@ -1335,9 +1398,10 @@ function renderPage4() {
   const pm = ct.payment_method || 'account';
   const acc = ct.payment_info?.account || {};
   const card = ct.payment_info?.card || {};
+  const sigmode = ct.signature_type || 'digital';
 
   return `
-    <section class="contract-page ct-cms-page">
+    <section class="contract-page ct-cms-page" data-page="4">
       <div class="ct-page-title">자동출금 이용 신청서</div>
 
       <div class="ct-cms-section">신청인 정보</div>
@@ -1396,20 +1460,64 @@ function renderPage4() {
         모든 책임은 신청인에게 있음을 확인합니다.
       </div>
 
-      <div class="ct-sign-wrap">
-        <div class="ct-sign-box">
-          <div class="ct-sign-label">
-            <span>공급자 (한별시스템) 서명</span>
-            <button type="button" class="ct-sign-clear no-print" data-sign-clear="supplier">✏ 다시 그리기</button>
+      <!-- 서명 방식 토글 -->
+      <div class="ct-sign-mode no-print">
+        <strong>서명 방식:</strong>
+        <label style="margin-left:10px;">
+          <input type="radio" name="ct-sigmode" value="digital" ${sigmode === 'digital' ? 'checked' : ''}> ✍ 전자서명
+        </label>
+        <label style="margin-left:14px;">
+          <input type="radio" name="ct-sigmode" value="stamp" ${sigmode === 'stamp' ? 'checked' : ''}> 🔴 도장 (출력 후 직접)
+        </label>
+      </div>
+
+      <!-- 전자서명 영역 (canvas 2개) -->
+      <div class="ct-sign-block ct-sign-digital ${sigmode === 'digital' ? '' : 'hidden'}">
+        <div class="ct-sign-wrap">
+          <div class="ct-sign-box">
+            <div class="ct-sign-label">
+              <span>공급자 (한별시스템) 서명</span>
+              <button type="button" class="ct-sign-clear no-print" data-sign-clear="supplier">✏ 다시 그리기</button>
+            </div>
+            <canvas class="ct-sign-canvas" id="ct-sign-supplier" data-sign-pad="supplier"></canvas>
           </div>
-          <canvas class="ct-sign-canvas" id="ct-sign-supplier" data-sign-pad="supplier"></canvas>
+          <div class="ct-sign-box">
+            <div class="ct-sign-label">
+              <span>신청인 서명</span>
+              <button type="button" class="ct-sign-clear no-print" data-sign-clear="applicant">✏ 다시 그리기</button>
+            </div>
+            <canvas class="ct-sign-canvas" id="ct-sign-applicant" data-sign-pad="applicant"></canvas>
+          </div>
         </div>
-        <div class="ct-sign-box">
-          <div class="ct-sign-label">
-            <span>신청인 서명</span>
-            <button type="button" class="ct-sign-clear no-print" data-sign-clear="applicant">✏ 다시 그리기</button>
+      </div>
+
+      <!-- 도장 모드 영역 -->
+      <div class="ct-sign-block ct-sign-stamp ${sigmode === 'stamp' ? '' : 'hidden'}">
+        <p class="muted" style="font-size:12px; margin:8px 0;">
+          계약서를 인쇄하여 도장 또는 자필 사인을 받은 후, 스캔한 파일을 아래에 업로드하세요.
+        </p>
+
+        <div class="ct-sign-wrap">
+          <div class="ct-sign-box">
+            <div class="ct-sign-label"><span>공급자 (한별시스템) 도장 / 사인</span></div>
+            <div class="ct-stamp-area">(아래 도장 / 자필 사인 영역)</div>
           </div>
-          <canvas class="ct-sign-canvas" id="ct-sign-applicant" data-sign-pad="applicant"></canvas>
+          <div class="ct-sign-box">
+            <div class="ct-sign-label"><span>신청인 도장 / 사인</span></div>
+            <div class="ct-stamp-area">(아래 도장 / 자필 사인 영역)</div>
+          </div>
+        </div>
+
+        <div class="ct-attach-row no-print">
+          <label>📄 도장이 찍힌 계약서 스캔본 (PDF 또는 이미지)</label>
+          <input type="file" id="ct-att-contract" accept="application/pdf,image/*">
+          <div id="ct-att-contract-meta" class="ct-attach-meta"></div>
+        </div>
+
+        <div class="ct-attach-row no-print">
+          <label>🆔 신분증 사진 (사업자등록증 또는 신분증)</label>
+          <input type="file" id="ct-att-idcard" accept="image/*,application/pdf">
+          <div id="ct-att-idcard-meta" class="ct-attach-meta"></div>
         </div>
       </div>
 
@@ -1541,8 +1649,7 @@ function bindEditorEvents() {
     b.addEventListener('click', () => {
       const i = Number(b.dataset.termDel);
       ct.terms.splice(i, 1);
-      document.getElementById('ct-terms-list').innerHTML = renderTermRows(ct.terms);
-      bindEditorEvents();
+      refreshTermsLists();
     });
   });
 
@@ -1550,9 +1657,8 @@ function bindEditorEvents() {
   if (termAdd) {
     termAdd.addEventListener('click', () => {
       const next = (ct.terms[ct.terms.length - 1]?.article || ct.terms.length) + 1;
-      ct.terms.push({ article: next, title: '신규 조항', body: '', confirmed: false });
-      document.getElementById('ct-terms-list').innerHTML = renderTermRows(ct.terms);
-      bindEditorEvents();
+      ct.terms.push({ article: next, title: '신규 조항', body: '', confirmed: true });
+      refreshTermsLists();
     });
   }
 
@@ -1632,6 +1738,63 @@ function bindEditorEvents() {
       CT_STATE.contract[k === 'supplier' ? 'sign_supplier' : 'sign_applicant'] = '';
     });
   });
+
+  // (9) 서명 방식 토글 (digital / stamp)
+  body.querySelectorAll('input[name="ct-sigmode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      ct.signature_type = r.value;
+      const digitalBlock = body.querySelector('.ct-sign-digital');
+      const stampBlock   = body.querySelector('.ct-sign-stamp');
+      if (digitalBlock) digitalBlock.classList.toggle('hidden', r.value !== 'digital');
+      if (stampBlock)   stampBlock.classList.toggle('hidden',   r.value !== 'stamp');
+      // 도장 모드로 전환 시 첨부 메타 갱신
+      if (r.value === 'stamp') refreshAttachmentMeta();
+      // 전자서명 모드로 돌아가면 패드 재초기화
+      if (r.value === 'digital') {
+        setTimeout(initSignaturePads, 50);
+      }
+    });
+  });
+
+  // (10) 첨부 파일 업로드 (도장 모드)
+  const attContract = body.querySelector('#ct-att-contract');
+  if (attContract) {
+    attContract.addEventListener('change', async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      await handleAttachmentUpload('contract', f);
+      attContract.value = '';
+    });
+  }
+  const attIdcard = body.querySelector('#ct-att-idcard');
+  if (attIdcard) {
+    attIdcard.addEventListener('change', async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      await handleAttachmentUpload('idcard', f);
+      attIdcard.value = '';
+    });
+  }
+
+  // 도장 모드면 첨부 메타 초기 렌더
+  if ((ct.signature_type || 'digital') === 'stamp') {
+    refreshAttachmentMeta();
+  }
+}
+
+// 약관 두 영역 (전반/후반) 동기 재렌더
+function refreshTermsLists() {
+  const ct = CT_STATE.contract;
+  if (!ct) return;
+  const all = ct.terms || [];
+  const front = all.filter(t => Number(t.article) <= 5);
+  const backStart = all.findIndex(t => Number(t.article) >= 6);
+  const back = backStart >= 0 ? all.slice(backStart) : [];
+  const fEl = document.getElementById('ct-terms-list-front');
+  const bEl = document.getElementById('ct-terms-list-back');
+  if (fEl) fEl.innerHTML = renderTermRows(front, 0);
+  if (bEl) bEl.innerHTML = renderTermRows(back, backStart >= 0 ? backStart : 0);
+  bindEditorEvents();
 }
 
 function renderEditorHeader() {
@@ -1762,6 +1925,245 @@ function initSignaturePads() {
   if (ct.sign_applicant) appPad.fromDataURL(ct.sign_applicant);
 }
 
+// ── 첨부 파일 업로드 / 다운로드 / 삭제 (Supabase Storage) ─────
+const ATTACH_BUCKET = 'rental-contracts';
+
+async function uploadAttachment(contract_id, kind, file) {
+  const supa = window.totalasAuth;
+  if (!supa) throw new Error('인증이 준비되지 않았습니다.');
+  const extRaw = (file.name.split('.').pop() || 'bin').toLowerCase();
+  const ext = extRaw.replace(/[^a-z0-9]/g, '').slice(0, 8) || 'bin';
+  const path = `${contract_id}/${kind}_${Date.now()}.${ext}`;
+  const { error } = await supa.storage
+    .from(ATTACH_BUCKET)
+    .upload(path, file, { upsert: true, contentType: file.type || undefined });
+  if (error) throw error;
+  return path;
+}
+
+async function getSignedAttachmentUrl(path) {
+  if (!path) return null;
+  const supa = window.totalasAuth;
+  if (!supa) return null;
+  try {
+    const { data, error } = await supa.storage
+      .from(ATTACH_BUCKET)
+      .createSignedUrl(path, 3600);
+    if (error) throw error;
+    return data?.signedUrl || null;
+  } catch (err) {
+    console.warn('signedUrl 실패:', err.message || err);
+    return null;
+  }
+}
+
+async function deleteAttachment(path) {
+  if (!path) return;
+  const supa = window.totalasAuth;
+  if (!supa) return;
+  try {
+    await supa.storage.from(ATTACH_BUCKET).remove([path]);
+  } catch (err) {
+    console.warn('Storage 파일 삭제 실패:', err.message || err);
+  }
+}
+
+// 업로드 핸들러 (kind: 'contract' | 'idcard')
+async function handleAttachmentUpload(kind, file) {
+  const ct = CT_STATE.contract;
+  if (!ct) return;
+  const supa = window.totalasAuth;
+  if (!supa) { toast('인증이 준비되지 않았습니다.', 'err'); return; }
+
+  // 5MB 제한 안내
+  const sizeMB = file.size / 1024 / 1024;
+  if (sizeMB > 20) {
+    toast(`파일이 너무 큽니다 (${sizeMB.toFixed(1)}MB). 20MB 이하만 업로드 가능합니다.`, 'err');
+    return;
+  }
+
+  const metaEl = document.getElementById(`ct-att-${kind}-meta`);
+  if (metaEl) {
+    metaEl.classList.remove('has-file');
+    metaEl.innerHTML = `<span style="color:#64748b;">⏳ 업로드 중… (${file.name}, ${(sizeMB).toFixed(2)}MB)</span>`;
+  }
+
+  try {
+    // 기존 파일이 있다면 삭제 시도 (best-effort)
+    const oldField = kind === 'contract' ? 'contract_scan_path' : 'id_card_path';
+    const oldPath = ct[oldField];
+    if (oldPath) {
+      await deleteAttachment(oldPath);
+    }
+
+    const path = await uploadAttachment(ct.id, kind, file);
+    ct[oldField] = path;
+    ct._attach_meta = ct._attach_meta || {};
+    ct._attach_meta[kind] = { name: file.name, size: file.size, type: file.type };
+
+    toast(`${kind === 'contract' ? '계약서 스캔본' : '신분증'} 업로드 완료`, 'ok');
+    refreshAttachmentMeta();
+  } catch (err) {
+    console.error(err);
+    toast(`업로드 실패: ${err.message || err}`, 'err');
+    if (metaEl) metaEl.innerHTML = `<span style="color:#dc2626;">⚠ 업로드 실패: ${escapeHtml(err.message || String(err))}</span>`;
+  }
+}
+
+// 첨부 메타(라벨/링크/삭제) 갱신
+async function refreshAttachmentMeta() {
+  const ct = CT_STATE.contract;
+  if (!ct) return;
+
+  for (const kind of ['contract', 'idcard']) {
+    const field = kind === 'contract' ? 'contract_scan_path' : 'id_card_path';
+    const path = ct[field];
+    const el = document.getElementById(`ct-att-${kind}-meta`);
+    if (!el) continue;
+
+    if (!path) {
+      el.classList.remove('has-file');
+      el.innerHTML = `<span style="color:#94a3b8;">파일이 업로드되지 않았습니다.</span>`;
+      continue;
+    }
+
+    const cachedMeta = ct._attach_meta?.[kind];
+    const fname = cachedMeta?.name || path.split('/').pop();
+    const fsize = cachedMeta?.size ? ` · ${(cachedMeta.size / 1024).toFixed(1)} KB` : '';
+    el.classList.add('has-file');
+    el.innerHTML = `
+      ✓ 업로드 완료: <strong>${escapeHtml(fname)}</strong>${escapeHtml(fsize)}
+      <a href="#" data-att-download="${escapeAttr(kind)}">🔗 다운로드</a>
+      <button type="button" data-att-delete="${escapeAttr(kind)}">🗑 삭제</button>
+    `;
+  }
+
+  // 다운로드 / 삭제 이벤트 바인딩
+  document.querySelectorAll('[data-att-download]').forEach(a => {
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const kind = a.dataset.attDownload;
+      const field = kind === 'contract' ? 'contract_scan_path' : 'id_card_path';
+      const url = await getSignedAttachmentUrl(ct[field]);
+      if (url) window.open(url, '_blank');
+      else toast('다운로드 링크 생성 실패', 'err');
+    });
+  });
+  document.querySelectorAll('[data-att-delete]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const kind = btn.dataset.attDelete;
+      if (!confirm('이 파일을 삭제하시겠습니까?')) return;
+      const field = kind === 'contract' ? 'contract_scan_path' : 'id_card_path';
+      const path = ct[field];
+      if (!path) return;
+      try {
+        await deleteAttachment(path);
+        ct[field] = '';
+        if (ct._attach_meta) delete ct._attach_meta[kind];
+        toast('파일이 삭제되었습니다.', 'ok');
+        refreshAttachmentMeta();
+      } catch (err) {
+        toast('삭제 실패: ' + (err.message || err), 'err');
+      }
+    });
+  });
+}
+
+// ── 인쇄 (계약서·약관 2매 + 자동이체 1매 = 7페이지) ─────────
+function buildPrintLayout() {
+  const root = document.getElementById('ct-print-clone');
+  if (!root) return false;
+  root.innerHTML = '';
+
+  // 페이지 1·2·3 을 갑/을 각 1매씩
+  const labels = ['갑 (임차인) 보관용', '을 (임대인 · 한별시스템) 보관용'];
+  labels.forEach(label => {
+    [1, 2, 3].forEach(pageNum => {
+      const orig = document.querySelector(`#ct-edit-modal .contract-page[data-page="${pageNum}"]`);
+      if (!orig) return;
+      const clone = orig.cloneNode(true);
+      // 라벨 박스 prepend
+      const tag = document.createElement('div');
+      tag.className = 'ct-print-copy-label';
+      tag.textContent = label;
+      clone.style.position = 'relative';
+      clone.prepend(tag);
+
+      // 전자서명 캔버스 → 이미지로 복제 (페이지 1·2·3엔 캔버스 없지만 안전망)
+      replaceCanvasesWithImages(orig, clone);
+
+      root.appendChild(clone);
+    });
+  });
+
+  // 페이지 4 (자동이체) — 1매만
+  const p4orig = document.querySelector(`#ct-edit-modal .contract-page[data-page="4"]`);
+  if (p4orig) {
+    const p4 = p4orig.cloneNode(true);
+    p4.style.position = 'relative';
+    // 도장 모드 첨부 영역(input) 은 인쇄에서 숨김 처리 (no-print 가 이미 있음)
+    replaceCanvasesWithImages(p4orig, p4);
+    root.appendChild(p4);
+  }
+
+  return true;
+}
+
+// 원본의 canvas 를 이미지로 변환해 클론의 canvas 자리에 삽입
+function replaceCanvasesWithImages(origNode, cloneNode) {
+  const origCanvases = origNode.querySelectorAll('canvas.ct-sign-canvas');
+  const cloneCanvases = cloneNode.querySelectorAll('canvas.ct-sign-canvas');
+  origCanvases.forEach((oc, idx) => {
+    const cc = cloneCanvases[idx];
+    if (!cc) return;
+    try {
+      const url = oc.toDataURL('image/png');
+      const img = document.createElement('img');
+      img.src = url;
+      img.style.width  = '100%';
+      img.style.height = '150px';
+      img.style.objectFit = 'contain';
+      img.style.display = 'block';
+      cc.parentNode.replaceChild(img, cc);
+    } catch (e) {
+      // taint된 캔버스 등 — 무시
+    }
+  });
+}
+
+function printContractMulti() {
+  // 캔버스 데이터를 최신화
+  const ct = CT_STATE.contract;
+  if (CT_STATE.signaturePads?.supplier) {
+    ct.sign_supplier = CT_STATE.signaturePads.supplier.toDataURL() || ct.sign_supplier;
+  }
+  if (CT_STATE.signaturePads?.applicant) {
+    ct.sign_applicant = CT_STATE.signaturePads.applicant.toDataURL() || ct.sign_applicant;
+  }
+
+  const ok = buildPrintLayout();
+  if (!ok) { toast('인쇄 레이아웃 생성 실패', 'err'); return; }
+
+  document.body.classList.add('ct-printing');
+  toast('인쇄 미리보기를 준비합니다… (7페이지)', 'ok');
+
+  // 인쇄 종료 후 정리
+  const cleanup = () => {
+    document.body.classList.remove('ct-printing');
+    const root = document.getElementById('ct-print-clone');
+    if (root) root.innerHTML = '';
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+
+  // 짧은 지연 — 클론 DOM이 그려질 시간 확보
+  setTimeout(() => {
+    window.print();
+    // 일부 브라우저는 afterprint 가 안 뜸 — fallback
+    setTimeout(cleanup, 1500);
+  }, 100);
+}
+
 // ── 저장 / 삭제 ────────────────────────────────────────
 async function saveContract() {
   const ct = CT_STATE.contract;
@@ -1800,6 +2202,9 @@ async function saveContract() {
     payment_info:   ct.payment_info || {},
     sign_supplier:  ct.sign_supplier  || null,
     sign_applicant: ct.sign_applicant || null,
+    signature_type: ct.signature_type || 'digital',
+    contract_scan_path: ct.contract_scan_path || null,
+    id_card_path:       ct.id_card_path || null,
     signed_at:      ct.signed_at,
     status:         ct.status || 'draft',
     notes:          ct.notes || null,
