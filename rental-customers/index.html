@@ -66,6 +66,85 @@
     margin-top: 4px;
     flex-wrap: wrap;
   }
+
+  /* 거래처 인라인 액션 (수정/만기/복원) */
+  .rc-cust-item { position: relative; }
+  .rc-cust-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: none;
+    gap: 4px;
+    z-index: 2;
+  }
+  .rc-cust-item:hover .rc-cust-actions,
+  .rc-cust-item.active .rc-cust-actions { display: flex; }
+  .rc-item-action {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    opacity: .75;
+    transition: all .12s;
+    color: var(--text-soft, #475569);
+  }
+  .rc-item-action:hover { opacity: 1; background: #f1f5f9; }
+  .rc-item-action[data-action="archive"]:hover {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+  }
+  .rc-item-action[data-action="restore"]:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    color: #065f46;
+  }
+  .rc-item-action[data-action="edit"]:hover {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    color: #1e40af;
+  }
+
+  /* 활성/만기 모드 라디오 */
+  .rc-list-mode {
+    display: flex;
+    gap: 14px;
+    font-size: 12.5px;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  .rc-list-mode label {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .rc-list-mode input[type="radio"] { margin: 0; }
+  .rc-cust-item.archived {
+    background: #fafafa;
+    border-style: dashed;
+  }
+  .rc-cust-item.archived .rc-cust-name { color: #64748b; }
+
+  /* 신규 거래처 안내 배너 (계약 에디터) */
+  .ct-new-customer-banner {
+    margin: 0 0 10px 0;
+    padding: 8px 12px;
+    background: #ecfdf5;
+    border: 1px solid #6ee7b7;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #065f46;
+  }
+  .ct-new-customer-banner strong { color: #047857; }
   .rc-tag {
     display: inline-block;
     padding: 1px 6px;
@@ -714,6 +793,7 @@
       <p class="muted" style="margin:2px 0 0 0;">Cross-selling 인사이트 · NAS 잠재고객 발굴 · 품목별 AS 주기 통합 관리</p>
     </div>
     <div class="page-head-actions">
+      <button class="btn ghost" id="btn-ct-new-top" title="선택된 거래처가 없으면 신규 거래처와 함께 작성합니다.">📄 새 계약서 작성</button>
       <button class="btn primary" id="btn-add">+ 거래처 추가</button>
     </div>
   </div>
@@ -745,6 +825,14 @@
   <div class="rc-layout">
     <!-- 좌측: 거래처 리스트 -->
     <section class="card rc-list-card">
+      <div class="rc-list-mode">
+        <label>
+          <input type="radio" name="rc-mode" value="active" checked> 활성 거래처
+        </label>
+        <label>
+          <input type="radio" name="rc-mode" value="archived"> 만기 거래처
+        </label>
+      </div>
       <div class="rc-toolbar">
         <input type="text" id="rc-search" placeholder="🔍 회사명 검색">
         <select id="rc-sort">
@@ -965,6 +1053,6 @@
   </form>
 </template>
 
-<script src="index.js?v=20260513e"></script>
+<script src="index.js?v=20260513f"></script>
 </body>
 </html>

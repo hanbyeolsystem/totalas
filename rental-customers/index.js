@@ -13,6 +13,7 @@ const STATE = {
     q: '',
     sort: 'name',
     onlyNas: false,
+    mode: 'active',      // 'active' | 'archived'
   },
 };
 
@@ -100,7 +101,32 @@ function bindUI() {
     STATE.filters.onlyNas = e.target.checked;
     renderList();
   });
+  // 활성/만기 모드 토글
+  document.querySelectorAll('input[name="rc-mode"]').forEach(r => {
+    r.addEventListener('change', async (e) => {
+      if (!e.target.checked) return;
+      STATE.filters.mode = e.target.value;
+      STATE.selectedId = null;
+      await loadAll();
+      renderDetail();
+    });
+  });
   document.getElementById('btn-add').addEventListener('click', () => openForm(null));
+
+  // 상단 "새 계약서 작성" 버튼
+  const topCtBtn = document.getElementById('btn-ct-new-top');
+  if (topCtBtn) {
+    topCtBtn.addEventListener('click', () => {
+      const sel = STATE.selectedId
+        ? STATE.customers.find(x => x.id === STATE.selectedId)
+        : null;
+      if (sel) {
+        openContractEditor(sel, null);
+      } else {
+        openContractEditor(null, null);  // 신규 거래처 흐름
+      }
+    });
+  }
 
   const backdrop = document.getElementById('rc-modal');
   backdrop.addEventListener('click', (e) => {
@@ -124,7 +150,8 @@ async function loadAll() {
   listEl.innerHTML = `<div class="muted" style="text-align:center; padding:20px; font-size:12px;">로딩 중…</div>`;
 
   try {
-    // 1. 거래처 + 할당(자산) JOIN
+    // 1. 거래처 + 할당(자산) JOIN — 활성/만기 모드에 따라 분기
+    const wantActive = STATE.filters.mode !== 'archived';
     const { data: custs, error: cErr } = await supa
       .from('rental_customers')
       .select(`
@@ -135,7 +162,7 @@ async function loadAll() {
           rental_items(id, category, subtype, brand, model, serial, install_date, status, storage_gb)
         )
       `)
-      .eq('active', true)
+      .eq('active', wantActive)
       .range(0, 999);
     if (cErr) throw cErr;
 
@@ -240,8 +267,16 @@ function recentMonths(n) {
 // ─────────────────────────────────────────────────────────────
 function renderStats() {
   const cs = STATE.customers;
+  const archived = STATE.filters.mode === 'archived';
+
+  // 활성/만기 모드에 따라 첫 번째 카드 라벨도 변경
+  const totalLabel = document.querySelector('#s-total')?.parentElement?.querySelector('.stat-label');
+  if (totalLabel) totalLabel.textContent = archived ? '만기 거래처' : '활성 거래처';
+
   document.getElementById('s-total').textContent = cs.length;
-  document.getElementById('s-total-sub').textContent = `총 자산 ${cs.reduce((s,c) => s + c._assignments.length, 0)}건`;
+  document.getElementById('s-total-sub').textContent = archived
+    ? `만기 처리된 거래처 (데이터 보존)`
+    : `총 자산 ${cs.reduce((s,c) => s + c._assignments.length, 0)}건`;
 
   const pcSetCandidate = cs.filter(c => c._hasPC && !c._hasMonitor).length;
   document.getElementById('s-pc-set').textContent = pcSetCandidate;
@@ -282,14 +317,34 @@ function renderList() {
     return;
   }
 
+  const archived = STATE.filters.mode === 'archived';
+
   listEl.innerHTML = arr.map(c => {
     const tags = [];
-    if (c._isNasCandidate) tags.push(`<span class="rc-tag nas">NAS 후보</span>`);
-    if (c._score >= 50) tags.push(`<span class="rc-tag score-hot">🔥 ${c._score}</span>`);
-    else if (c._score >= 25) tags.push(`<span class="rc-tag score-mid">${c._score}</span>`);
-    else if (c._score > 0) tags.push(`<span class="rc-tag score-low">${c._score}</span>`);
+    if (archived) {
+      const ad = c.archived_at ? String(c.archived_at).slice(0, 10) : '';
+      tags.push(`<span class="rc-tag" style="background:#fee2e2;color:#991b1b;">만기${ad ? ' ' + ad : ''}</span>`);
+    } else {
+      if (c._isNasCandidate) tags.push(`<span class="rc-tag nas">NAS 후보</span>`);
+      if (c._score >= 50) tags.push(`<span class="rc-tag score-hot">🔥 ${c._score}</span>`);
+      else if (c._score >= 25) tags.push(`<span class="rc-tag score-mid">${c._score}</span>`);
+      else if (c._score > 0) tags.push(`<span class="rc-tag score-low">${c._score}</span>`);
+    }
+
+    // 인라인 액션 버튼 — 모드별 분기
+    const actions = archived
+      ? `
+        <button class="rc-item-action" data-action="edit" title="수정">✏</button>
+        <button class="rc-item-action" data-action="restore" title="활성으로 복원">🔄</button>
+      `
+      : `
+        <button class="rc-item-action" data-action="edit" title="수정">✏</button>
+        <button class="rc-item-action" data-action="archive" title="만기 처리(보관)">🗑</button>
+      `;
+
     return `
-      <div class="rc-cust-item ${STATE.selectedId === c.id ? 'active' : ''}" data-id="${escapeAttr(c.id)}">
+      <div class="rc-cust-item ${STATE.selectedId === c.id ? 'active' : ''} ${archived ? 'archived' : ''}" data-id="${escapeAttr(c.id)}">
+        <div class="rc-cust-actions">${actions}</div>
         <div class="rc-cust-name">${escapeHtml((c.company || '').split('\n')[0])}</div>
         <div class="rc-cust-sub">자산 ${c._assignments.length}건 · ${escapeHtml((c.address || '').slice(0, 24))}</div>
         <div class="rc-cust-tags">${tags.join('')}</div>
@@ -298,12 +353,70 @@ function renderList() {
   }).join('');
 
   listEl.querySelectorAll('.rc-cust-item').forEach(el => {
+    // 액션 버튼 클릭 — 상위 선택 이벤트 방지
+    el.querySelectorAll('.rc-item-action').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cid = el.dataset.id;
+        const action = btn.dataset.action;
+        const cust = STATE.customers.find(x => x.id === cid);
+        if (!cust) return;
+        if (action === 'edit') openForm(cust);
+        else if (action === 'archive') archiveCustomer(cust);
+        else if (action === 'restore') restoreCustomer(cust);
+      });
+    });
+
     el.addEventListener('click', () => {
       STATE.selectedId = el.dataset.id;
       renderList();
       renderDetail();
     });
   });
+}
+
+// 만기 처리 (active=false, archived_at, archived_reason 기록)
+async function archiveCustomer(c) {
+  const name = (c.company || '').split('\n')[0];
+  if (!confirm(`'${name}' 거래처를 만기 처리합니다.\n\n만기 거래처 목록으로 이동되며 데이터는 보존됩니다.\n진행할까요?`)) return;
+  try {
+    const supa = window.totalasAuth;
+    const { error } = await supa.from('rental_customers').update({
+      active: false,
+      archived_at: new Date().toISOString(),
+      archived_reason: '임대 만기',
+    }).eq('id', c.id);
+    if (error) throw error;
+    toast('만기 처리 완료', 'ok');
+    if (STATE.selectedId === c.id) STATE.selectedId = null;
+    await loadAll();
+    renderDetail();
+  } catch (err) {
+    console.error(err);
+    toast('만기 처리 실패: ' + (err.message || err), 'err');
+  }
+}
+
+// 만기 → 활성 복원
+async function restoreCustomer(c) {
+  const name = (c.company || '').split('\n')[0];
+  if (!confirm(`'${name}' 거래처를 활성으로 복원할까요?`)) return;
+  try {
+    const supa = window.totalasAuth;
+    const { error } = await supa.from('rental_customers').update({
+      active: true,
+      archived_at: null,
+      archived_reason: null,
+    }).eq('id', c.id);
+    if (error) throw error;
+    toast('활성으로 복원되었습니다.', 'ok');
+    if (STATE.selectedId === c.id) STATE.selectedId = null;
+    await loadAll();
+    renderDetail();
+  } catch (err) {
+    console.error(err);
+    toast('복원 실패: ' + (err.message || err), 'err');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -313,7 +426,12 @@ function renderDetail() {
   const detail = document.getElementById('rc-detail');
   const c = STATE.customers.find(x => x.id === STATE.selectedId);
   if (!c) {
-    detail.innerHTML = `<div class="card rc-detail-empty"><p style="font-size:14px; margin:0;">좌측에서 거래처를 선택하세요.</p></div>`;
+    const empty = STATE.filters.mode === 'archived'
+      ? (STATE.customers.length === 0
+          ? `<div class="card rc-detail-empty"><p style="font-size:14px; margin:0;">만기 처리된 거래처가 없습니다.</p><p class="muted" style="font-size:12px; margin-top:8px;">활성 거래처 목록의 🗑 아이콘으로 만기 처리할 수 있습니다.</p></div>`
+          : `<div class="card rc-detail-empty"><p style="font-size:14px; margin:0;">좌측에서 만기 거래처를 선택하세요.</p></div>`)
+      : `<div class="card rc-detail-empty"><p style="font-size:14px; margin:0;">좌측에서 거래처를 선택하세요.</p></div>`;
+    detail.innerHTML = empty;
     return;
   }
 
@@ -958,10 +1076,13 @@ function newContractDraft(customer) {
   const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const start = ymd(today);
   const end = new Date(today.getFullYear() + 3, today.getMonth(), today.getDate());
-  const seq = String((CT_STATE.byCustomer[customer.id] || []).length + 1).padStart(2, '0');
+  // 신규 거래처(customer===null)일 때 — 전체 계약서 수 기반 sequence
+  const seq = customer
+    ? String((CT_STATE.byCustomer[customer.id] || []).length + 1).padStart(2, '0')
+    : '01';
   return {
     id,
-    customer_id: customer.id,
+    customer_id: customer ? customer.id : null,
     contract_no: `${today.getFullYear()}-${seq}`,
     contract_date: ymd(today),
     period_years: 3,
@@ -969,19 +1090,19 @@ function newContractDraft(customer) {
     period_end: ymd(end),
     deposit: 0,
     install_fee: 0,
-    company_snapshot:      customer.company || '',
-    contact_name_snapshot: customer.contact_name || '',
-    biz_no_snapshot:       customer.biz_no || '',
-    address_snapshot:      customer.address || '',
-    phone_snapshot:        customer.phone || customer.mobile || '',
-    email_snapshot:        customer.email || '',
+    company_snapshot:      customer ? (customer.company || '') : '',
+    contact_name_snapshot: customer ? (customer.contact_name || '') : '',
+    biz_no_snapshot:       customer ? (customer.biz_no || '') : '',
+    address_snapshot:      customer ? (customer.address || '') : '',
+    phone_snapshot:        customer ? (customer.phone || customer.mobile || '') : '',
+    email_snapshot:        customer ? (customer.email || '') : '',
     items: [],
     terms:  JSON.parse(JSON.stringify(DEFAULT_TERMS)),
     extras: JSON.parse(JSON.stringify(DEFAULT_EXTRAS)),
     special_terms: '',
     payment_method: 'account',
     payment_info: {
-      account: { bank: '', account_no: '', holder: '', biz_no: customer.biz_no || '', draft_day: 25 },
+      account: { bank: '', account_no: '', holder: '', biz_no: customer ? (customer.biz_no || '') : '', draft_day: 25 },
       card:    { card_brand: '', card_no: '', expiry: '', holder: '', draft_day: 25 },
     },
     sign_supplier: '',
@@ -1068,8 +1189,10 @@ function renderContractCard(customer) {
 }
 
 // 계약서 에디터 열기 ────────────────────────────────────
+// customer=null 이면 "신규 거래처와 함께 작성" 흐름
 function openContractEditor(customer, existing) {
-  CT_STATE.customer = customer;
+  CT_STATE.customer = customer;           // null 허용
+  CT_STATE.isNewCustomer = !customer;     // 신규 거래처 흐름 플래그
   CT_STATE.contract = existing
     ? JSON.parse(JSON.stringify(existing))   // 깊은 복사 (수정 취소 가능하게)
     : newContractDraft(customer);
@@ -1084,13 +1207,14 @@ function closeContractEditor() {
   // 캔버스 정리
   CT_STATE.signaturePads = {};
   CT_STATE.contract = null;
+  CT_STATE.isNewCustomer = false;
 }
 
 // 계약서 에디터 렌더 (헤더 + 4페이지) ──────────────────
 function renderContractEditor() {
   const ct = CT_STATE.contract;
-  const cu = CT_STATE.customer;
-  if (!ct || !cu) return;
+  const cu = CT_STATE.customer;  // null 허용 (신규 거래처 흐름)
+  if (!ct) return;
 
   const head = document.getElementById('ct-edit-head');
   const body = document.getElementById('ct-edit-body');
@@ -1099,10 +1223,14 @@ function renderContractEditor() {
   const statusLabel = ({
     'draft': '작성중', 'signed': '서명완료', 'active': '진행중', 'terminated': '해지',
   })[ct.status] || ct.status;
+  const headerCompany = cu
+    ? (cu.company || '-')
+    : (ct.company_snapshot || '(신규 거래처)');
   head.innerHTML = `
     <div class="ct-h-left">
       <div class="ct-h-title">
-        ${escapeHtml(cu.company || '-')}
+        ${escapeHtml(headerCompany)}
+        ${CT_STATE.isNewCustomer ? '<span class="rc-ct-badge" style="background:#fef3c7;color:#92400e;margin-left:8px;">신규</span>' : ''}
         <span class="rc-ct-badge ${escapeAttr(ct.status)}" style="margin-left:8px;">${escapeHtml(statusLabel)}</span>
       </div>
       <div class="ct-h-meta">계약번호 ${escapeHtml(ct.contract_no)} · 작성 ${escapeHtml(ct.contract_date)}</div>
@@ -1125,8 +1253,16 @@ function renderContractEditor() {
   `;
 
   // ── 본문: 4 페이지 ───────
+  const newCustomerBanner = CT_STATE.isNewCustomer ? `
+    <div class="ct-new-customer-banner no-print">
+      <strong>신규 거래처입니다.</strong>
+      회사명·담당자·사업자번호·주소 등을 페이지 1의 "임차인" 박스에 입력하세요.
+      저장 시 거래처가 자동으로 등록되며, 동일한 회사명이 이미 있으면 기존 거래처에 연결됩니다.
+    </div>
+  ` : '';
   body.innerHTML = `
     <div class="contract-doc">
+      ${newCustomerBanner}
       ${renderPage1()}
       <div class="ct-page-divider no-print">― Page 2 ―</div>
       ${renderPage2()}
@@ -1153,6 +1289,9 @@ function renderContractEditor() {
 // ── 페이지 1: 표지 ─────────────────────────────────────
 function renderPage1() {
   const ct = CT_STATE.contract;
+  const isNew = !!CT_STATE.isNewCustomer;
+  // 신규 거래처 흐름: placeholder 추가, value 는 그대로(빈 값)
+  const ph = (text) => isNew ? ` placeholder="${escapeAttr(text)}"` : '';
   return `
     <section class="contract-page" data-page="1">
       <div class="ct-cover-head">
@@ -1170,19 +1309,19 @@ function renderPage1() {
         <tbody>
           <tr>
             <th class="ct-vlabel" rowspan="3">임 차 인<br>(갑·신청인)</th>
-            <td><label style="font-size:10px; color:#555;">회사명</label><input class="ct-input ed" data-field="company_snapshot" value="${escapeAttr(ct.company_snapshot)}"></td>
+            <td><label style="font-size:10px; color:#555;">회사명${isNew ? ' *' : ''}</label><input class="ct-input ed" data-field="company_snapshot" value="${escapeAttr(ct.company_snapshot)}"${ph('회사명 (필수)')}></td>
             <th>대표자</th>
-            <td><input class="ct-input ed" data-field="contact_name_snapshot" value="${escapeAttr(ct.contact_name_snapshot)}"></td>
+            <td><input class="ct-input ed" data-field="contact_name_snapshot" value="${escapeAttr(ct.contact_name_snapshot)}"${ph('담당자/대표자명')}></td>
           </tr>
           <tr>
             <th>사업자번호</th>
-            <td><input class="ct-input ed" data-field="biz_no_snapshot" value="${escapeAttr(ct.biz_no_snapshot)}"></td>
+            <td><input class="ct-input ed" data-field="biz_no_snapshot" value="${escapeAttr(ct.biz_no_snapshot)}"${ph('000-00-00000')}></td>
             <th>전화</th>
-            <td><input class="ct-input ed" data-field="phone_snapshot" value="${escapeAttr(ct.phone_snapshot)}"></td>
+            <td><input class="ct-input ed" data-field="phone_snapshot" value="${escapeAttr(ct.phone_snapshot)}"${ph('연락처')}></td>
           </tr>
           <tr>
             <th>주소</th>
-            <td colspan="3"><input class="ct-input ed" data-field="address_snapshot" value="${escapeAttr(ct.address_snapshot)}"></td>
+            <td colspan="3"><input class="ct-input ed" data-field="address_snapshot" value="${escapeAttr(ct.address_snapshot)}"${ph('사업장 주소')}></td>
           </tr>
           <tr>
             <th class="ct-vlabel" rowspan="2">임 대 인<br>(을·공급자)</th>
@@ -2178,6 +2317,54 @@ async function saveContract() {
     ct.signed_at = new Date().toISOString();
   }
 
+  // ── 신규 거래처 자동 생성/연결 ──
+  // customer_id 가 없으면: 회사명 중복 확인 → 있으면 연결, 없으면 INSERT
+  let autoCreatedCustomerId = null;
+  if (!ct.customer_id) {
+    const companyName = (ct.company_snapshot || '').trim();
+    if (!companyName) {
+      toast('회사명을 입력하세요. (페이지 1 임차인 박스)', 'err');
+      return;
+    }
+    try {
+      // 정확 일치 우선 — active 무관 (만기 거래처도 재활용)
+      const { data: exist, error: exErr } = await supa
+        .from('rental_customers')
+        .select('id, company, active')
+        .eq('company', companyName)
+        .limit(1);
+      if (exErr) throw exErr;
+
+      if (exist && exist.length) {
+        ct.customer_id = exist[0].id;
+        autoCreatedCustomerId = exist[0].id;
+        toast(`기존 거래처 "${exist[0].company}"에 연결되었습니다.`, 'ok');
+      } else {
+        // 신규 INSERT
+        const newId = 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+        const { error: insErr } = await supa.from('rental_customers').insert({
+          id:           newId,
+          company:      companyName,
+          contact_name: (ct.contact_name_snapshot || '').trim() || null,
+          phone:        (ct.phone_snapshot || '').trim() || null,
+          biz_no:       (ct.biz_no_snapshot || '').trim() || null,
+          address:      (ct.address_snapshot || '').trim() || null,
+          email:        (ct.email_snapshot || '').trim() || null,
+          active:       true,
+        });
+        if (insErr) throw insErr;
+        ct.customer_id = newId;
+        autoCreatedCustomerId = newId;
+        CT_STATE.isNewCustomer = false;
+        toast('새 거래처가 추가되었습니다.', 'ok');
+      }
+    } catch (err) {
+      console.error(err);
+      toast('거래처 자동 등록 실패: ' + (err.message || err), 'err');
+      return;
+    }
+  }
+
   const payload = {
     id: ct.id,
     customer_id: ct.customer_id,
@@ -2216,9 +2403,52 @@ async function saveContract() {
     if (error) throw error;
     toast('계약서가 저장되었습니다.', 'ok');
     ct._existing = true;
+
+    // 거래처 자동 생성/연결이 일어났다면: 전체 거래처 리스트 reload + 해당 거래처 선택
+    if (autoCreatedCustomerId) {
+      await loadAll();
+      const cust = STATE.customers.find(x => x.id === autoCreatedCustomerId);
+      if (cust) {
+        STATE.selectedId = autoCreatedCustomerId;
+        CT_STATE.customer = cust;        // 에디터의 현재 거래처도 갱신
+      } else {
+        // 만기 모드라 STATE에 안 보일 수 있음 — 활성 모드로 전환
+        STATE.filters.mode = 'active';
+        const modeRadio = document.querySelector('input[name="rc-mode"][value="active"]');
+        if (modeRadio) modeRadio.checked = true;
+        await loadAll();
+        const cust2 = STATE.customers.find(x => x.id === autoCreatedCustomerId);
+        if (cust2) {
+          STATE.selectedId = autoCreatedCustomerId;
+          CT_STATE.customer = cust2;
+        }
+      }
+      renderList();
+    }
+
     // 거래처별 리스트 새로고침 + 상세 패널 갱신
     await loadContractsFor(ct.customer_id);
     renderDetail();
+    // 신규 배지/배너 제거 (현재 서명 패드 유지 위해 헤더+배너만 정리)
+    if (autoCreatedCustomerId) {
+      const banner = document.querySelector('.ct-new-customer-banner');
+      if (banner) banner.remove();
+      // 헤더의 "신규" 배지 갱신
+      const head = document.getElementById('ct-edit-head');
+      if (head) {
+        const newBadge = head.querySelector('.rc-ct-badge[style*="fef3c7"]');
+        if (newBadge) newBadge.remove();
+        const headerTitle = head.querySelector('.ct-h-title');
+        if (headerTitle) {
+          const firstChild = headerTitle.firstChild;
+          if (firstChild && firstChild.nodeType === 3) {
+            const newName = (CT_STATE.customer && CT_STATE.customer.company)
+              || ct.company_snapshot || '-';
+            firstChild.textContent = newName + ' ';
+          }
+        }
+      }
+    }
   } catch (err) {
     console.error(err);
     toast('저장 실패: ' + (err.message || err), 'err');
