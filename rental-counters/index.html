@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>임대카운터 — 한별시스템</title>
-<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../styles.css?v=20260513l">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="../config.js"></script>
@@ -22,21 +22,29 @@
     </div>
   </div>
 
-  <!-- 상단 통계 -->
-  <div class="stats" id="stats">
-    <div class="stat-card"><div class="stat-label">이번달 입력 자산</div><div class="stat-value" id="st-entered">–</div></div>
-    <div class="stat-card"><div class="stat-label">누적 BW (이번달)</div><div class="stat-value primary" id="st-bw">–</div></div>
-    <div class="stat-card"><div class="stat-label">누적 컬러 (이번달)</div><div class="stat-value primary" id="st-co">–</div></div>
-    <div class="stat-card"><div class="stat-label">미수집 자산</div><div class="stat-value warn" id="st-missing">–</div></div>
-    <div class="stat-card"><div class="stat-label">이상치 경고</div><div class="stat-value warn" id="st-alerts">–</div></div>
+  <!-- 상단 통계 (클릭하면 아래 업체 목록 펼침) -->
+  <div class="stats stats-clickable" id="stats">
+    <div class="stat-card" data-drill="new"><div class="stat-label">이번달 신규 입력</div><div class="stat-value primary" id="st-new">–</div></div>
+    <div class="stat-card" data-drill="entered"><div class="stat-label">카운터 입력된 업체</div><div class="stat-value" id="st-co-done">–</div></div>
+    <div class="stat-card" data-drill="missing"><div class="stat-label">입력 안된 업체</div><div class="stat-value warn" id="st-co-missing">–</div></div>
+    <div class="stat-card" data-drill="anomaly"><div class="stat-label">이상치 경고</div><div class="stat-value warn" id="st-alerts">–</div></div>
+  </div>
+
+  <!-- 드릴다운 패널 (통계 카드 클릭 시 펼침) -->
+  <div class="card drilldown-card" id="drilldown" style="display:none;">
+    <div class="drilldown-head">
+      <strong id="drilldown-title">업체 목록</strong>
+      <button class="btn ghost small" id="btn-drilldown-close" type="button">✕ 닫기</button>
+    </div>
+    <div id="drilldown-body"></div>
   </div>
 
   <!-- 엑셀 일괄 입력 -->
   <div class="card excel-import-card" id="excel-card">
     <div class="excel-import-head">
       <div>
-        <strong>📥 엑셀 일괄 입력</strong>
-        <span class="muted-small" style="margin-left:8px;">업체명 + BW/컬러 카운터를 한 번에 매칭/저장</span>
+        <strong>📥 엑셀 자동 입력</strong>
+        <span class="muted-small" style="margin-left:8px;">파일을 끌어다 놓으면 자동 매칭 → 즉시 저장. 실패한 행만 아래에서 수동 처리.</span>
       </div>
       <button class="btn ghost small" id="btn-excel-toggle" type="button">열기 ▾</button>
     </div>
@@ -127,35 +135,50 @@
   <!-- 데이터 그리드 -->
   <div class="card counters-card">
     <div class="counters-table-wrap">
-      <table class="sticky-first-col" style="width:100%; border-collapse:collapse; font-size:13px;">
+      <table class="sticky-first-col counters-grid" style="width:100%; border-collapse:collapse; font-size:12px;">
+        <colgroup>
+          <col class="col-name">
+          <col class="col-date">
+          <col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data">
+          <col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data"><col class="col-data">
+        </colgroup>
         <thead>
           <tr style="background:#f8fafc;">
-            <th style="text-align:left;">거래처 / 모델</th>
-            <th>구분</th>
-            <th class="num" style="text-align:right;">이전월 BW</th>
-            <th class="num" style="text-align:right;">이번달 BW</th>
-            <th class="num" style="text-align:right;">BW 증가</th>
-            <th class="num" style="text-align:right;">이전월 컬러</th>
-            <th class="num" style="text-align:right;">이번달 컬러</th>
-            <th class="num" style="text-align:right;">컬러 증가</th>
-            <th class="num" style="text-align:right;">Uptime(h)</th>
-            <th style="text-align:left;">예측/경고</th>
+            <th rowspan="2" style="text-align:left;">거래처 / 모델</th>
+            <th rowspan="2" style="text-align:center;">날짜<br><span style="font-weight:400; font-size:11px; color:#64748b;">(<span id="hdr-year">2026</span>년)</span></th>
+            <th colspan="7" class="grp-bw" style="text-align:center;">흑백</th>
+            <th colspan="7" class="grp-co" style="text-align:center;">컬러</th>
+          </tr>
+          <tr style="background:#f8fafc; font-size:11px;">
+            <th class="num grp-bw">전월COUNT</th>
+            <th class="num grp-bw">당월COUNT</th>
+            <th class="num grp-bw">기본매수</th>
+            <th class="num grp-bw">월카운터</th>
+            <th class="num grp-bw">추가카운터</th>
+            <th class="num grp-bw">추가사용단가</th>
+            <th class="num grp-bw">추가사용료</th>
+            <th class="num grp-co">전월COUNT</th>
+            <th class="num grp-co">당월COUNT</th>
+            <th class="num grp-co">기본매수</th>
+            <th class="num grp-co">월카운터</th>
+            <th class="num grp-co">추가카운터</th>
+            <th class="num grp-co">추가사용단가</th>
+            <th class="num grp-co">추가사용료</th>
           </tr>
         </thead>
         <tbody id="grid-body">
-          <tr><td colspan="10" class="muted-small" style="text-align:center; padding:30px;">데이터 로딩 중…</td></tr>
+          <tr><td colspan="16" class="muted-small" style="text-align:center; padding:30px;">데이터 로딩 중…</td></tr>
         </tbody>
       </table>
     </div>
     <div class="muted-small" style="margin-top:10px;">
-      💡 셀을 클릭하여 직접 입력하면 자동 저장됩니다.
-      <span style="color:#dc2626; margin-left:14px;">🔴</span> = 이상치(이전 6개월 평균의 3배 초과)
-      <span style="margin-left:14px;">⚠</span> = 30일 내 소모품 교체 예정
+      💡 <b>당월COUNT</b> 셀을 클릭해 입력하면 자동 저장됩니다. 월카운터/추가카운터/추가사용료는 자동 계산.
+      <span style="color:#dc2626; margin-left:14px;">🔴</span> 이전 6개월 평균의 3배 초과 → 이상치 경고
     </div>
   </div>
 
   <div id="toast" style="position:fixed; bottom:20px; right:20px; padding:10px 16px; border-radius:8px; background:#0f172a; color:#fff; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:9999;"></div>
 </main>
-<script src="index.js?v=20260513f"></script>
+<script src="index.js?v=20260513l"></script>
 </body>
 </html>

@@ -33,6 +33,12 @@ const state = {
   histMap: {},          // item_id → [ {ym, bw, color, uptime_hours} ... ]  (최근 6개월)
   suppliesMap: {},      // item_id → 최근 supplies row
   customers: [],
+  customerCombined: {}, // cid → boolean (합산 청구 여부 캐시)
+  customerPeriod: {},   // cid → 1/3/6/12 (청구 주기 개월)
+  drilldown: null,      // { new, entered, missing, anomaly }
+  activeDrilldown: null,
+  // 거래처별 자산 수 (1대만 가진 거래처는 합산 토글 숨김용)
+  itemsPerCustomer: {},
 };
 
 // auth.js 의 bootstrap() 이 완료되어 window.currentUser 가 채워질 때까지 대기
@@ -53,11 +59,25 @@ async function init() {
   }
   // 초기 월 셀렉터
   document.getElementById('f-month').value = state.ym;
-  document.getElementById('f-month').addEventListener('change', e => { state.ym = e.target.value || ymOfNow(); reload(); });
+  updateYearHeader();
+  document.getElementById('f-month').addEventListener('change', e => {
+    state.ym = e.target.value || ymOfNow();
+    updateYearHeader();
+    reload();
+  });
   document.getElementById('f-customer').addEventListener('change', e => { state.customerId = e.target.value; render(); });
   document.getElementById('f-category').addEventListener('change', e => { state.category = e.target.value; render(); });
   document.getElementById('f-only-missing').addEventListener('change', e => { state.onlyMissing = e.target.checked; render(); });
   document.getElementById('btn-refresh').addEventListener('click', reload);
+
+  // 통계 카드 클릭 → 드릴다운 토글
+  document.querySelectorAll('#stats .stat-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const key = card.dataset.drill;
+      if (key) toggleDrilldown(key);
+    });
+  });
+  document.getElementById('btn-drilldown-close').addEventListener('click', () => closeDrilldown());
 
   initExcelImport();
 
@@ -76,15 +96,29 @@ async function reload() {
     console.error(err);
     toast('로드 실패: ' + (err.message || err), true);
     document.getElementById('grid-body').innerHTML =
-      `<tr><td colspan="10" style="text-align:center; padding:20px; color:#dc2626;">데이터 로드 실패: ${escapeHtml(err.message || String(err))}</td></tr>`;
+      `<tr><td colspan="16" style="text-align:center; padding:20px; color:#dc2626;">데이터 로드 실패: ${escapeHtml(err.message || String(err))}</td></tr>`;
   }
 }
 
 async function loadCustomers() {
-  const { data, error } = await supa.from('rental_customers')
-    .select('id, company').order('company');
-  if (error) throw error;
+  // bill_combined / billing_months 컬럼이 아직 없는 환경에서도 동작하도록 시도-실패 분기
+  let { data, error } = await supa.from('rental_customers')
+    .select('id, company, bill_combined, billing_months').order('company');
+  if (error && /column .* does not exist/i.test(error.message || '')) {
+    console.warn('[loadCustomers] bill_combined/billing_months 컬럼 없음 — 17, 18 SQL 실행 필요');
+    const fallback = await supa.from('rental_customers').select('id, company').order('company');
+    if (fallback.error) throw fallback.error;
+    data = (fallback.data || []).map(c => ({ ...c, bill_combined: false, billing_months: 1 }));
+  } else if (error) {
+    throw error;
+  }
   state.customers = data || [];
+  state.customerCombined = {};
+  state.customerPeriod = {};
+  for (const c of state.customers) {
+    state.customerCombined[c.id] = !!c.bill_combined;
+    state.customerPeriod[c.id]   = c.billing_months || 1;
+  }
 }
 
 async function loadItems() {
@@ -110,6 +144,7 @@ async function loadItems() {
       install_date: it.install_date,
       customer_id: asgn?.customer_id || null,
       customer_name: asgn?.rental_customers?.company || '(미배정)',
+      monthly_fee: asgn?.monthly_fee ?? 0,
       bw_rate: asgn?.bw_rate ?? 0,
       co_rate: asgn?.co_rate ?? 0,
       bw_free: asgn?.bw_free ?? 0,
@@ -171,34 +206,78 @@ function fillCustomerFilter() {
 
 function render() {
   const tbody = document.getElementById('grid-body');
-  const rows = state.items
+  let rows = state.items
     .filter(it => !state.customerId || it.customer_id === state.customerId)
     .filter(it => !state.category || (it.category === state.category))
     .map(it => buildRow(it))
     .filter(r => !state.onlyMissing || r.missing);
 
-  // 통계
-  let totalBW = 0, totalCO = 0, alerts = 0, entered = 0, missing = 0;
+  // 거래처별 정렬 → 한 거래처의 첫 행에 합산 체크박스 표시
+  rows.sort((a, b) => {
+    const an = a.item.customer_name || '';
+    const bn = b.item.customer_name || '';
+    if (an !== bn) return an.localeCompare(bn);
+    return (a.item.model || '').localeCompare(b.item.model || '');
+  });
+  state.itemsPerCustomer = {};
   for (const r of rows) {
-    const cur = state.curMap[r.item.id];
-    if (cur) {
-      entered++;
-      totalBW += (cur.bw || 0);
-      totalCO += (cur.color || 0);
-    } else {
-      missing++;
-    }
-    if (r.anomaly) alerts++;
+    const cid = r.item.customer_id;
+    if (cid) state.itemsPerCustomer[cid] = (state.itemsPerCustomer[cid] || 0) + 1;
   }
-  document.getElementById('st-entered').textContent = entered.toLocaleString();
-  document.getElementById('st-bw').textContent = totalBW.toLocaleString();
-  document.getElementById('st-co').textContent = totalCO.toLocaleString();
-  document.getElementById('st-missing').textContent = missing.toLocaleString();
+  let lastCid = null;
+  for (const r of rows) {
+    r._isCustomerFirst = r.item.customer_id !== lastCid;
+    lastCid = r.item.customer_id;
+  }
+
+  // === 통계 ===
+  // 신규 입력 = 이전월에 카운터 없었지만 이번달에 입력된 거래처 (= 새로 시작된 업체)
+  // 카운터 입력된 업체 = 이번달 카운터 1건 이상 입력된 거래처 (총)
+  // 입력 안된 업체 = 자산 보유 중 이번달 미입력 거래처
+  // 이상치 경고 = 자산 단위 이상치 수
+  let alerts = 0;
+  const customerStats = new Map(); // cid → { id, name, items[], enteredItems[], anomalies[], bwTotal, coTotal, hadPrev }
+  for (const r of rows) {
+    const cid = r.item.customer_id;
+    if (!cid) continue;
+    if (!customerStats.has(cid)) {
+      customerStats.set(cid, {
+        id: cid, name: r.item.customer_name,
+        items: [], enteredItems: [], anomalies: [],
+        bwTotal: 0, coTotal: 0,
+        hadPrev: false,  // 이전월 카운터 존재 여부 (자산 1대라도)
+      });
+    }
+    const cs = customerStats.get(cid);
+    cs.items.push(r);
+    if (r.cur) {
+      cs.enteredItems.push(r);
+      cs.bwTotal += (r.cur.bw || 0);
+      cs.coTotal += (r.cur.color || 0);
+    }
+    if (r.prev) cs.hadPrev = true;
+    if (r.anomaly) { alerts++; cs.anomalies.push(r); }
+  }
+
+  const all = [...customerStats.values()];
+  const entered = all.filter(cs => cs.enteredItems.length > 0);
+  const missing = all.filter(cs => cs.enteredItems.length === 0);
+  const newly   = entered.filter(cs => !cs.hadPrev); // 이전월 미입력 → 이번달 입력
+  const anomaly = all.filter(cs => cs.anomalies.length > 0);
+
+  state.drilldown = { new: newly, entered, missing, anomaly };
+
+  document.getElementById('st-new').textContent = newly.length.toLocaleString();
+  document.getElementById('st-co-done').textContent = entered.length.toLocaleString();
+  document.getElementById('st-co-missing').textContent = missing.length.toLocaleString();
   document.getElementById('st-alerts').textContent = alerts.toLocaleString();
   document.getElementById('row-count').textContent = `${rows.length}개 자산`;
 
+  // 활성 드릴다운 재렌더
+  if (state.activeDrilldown) renderDrilldown(state.activeDrilldown);
+
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="muted-small" style="text-align:center; padding:30px;">조건에 맞는 자산이 없습니다.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" class="muted-small" style="text-align:center; padding:30px;">조건에 맞는 자산이 없습니다.</td></tr>';
     return;
   }
 
@@ -211,36 +290,38 @@ function buildRow(item) {
   const prev = state.prevMap[item.id] || null;
   const hist = state.histMap[item.id] || [];
 
-  const isMeter = (item.category === 'printer') || ['laser', 'inkjet', '복합기'].includes(item.subtype);
-  const isUptime = ['pc', 'nas'].includes(item.category) || ['pc', 'nas'].includes(item.subtype);
+  const isMeter = (item.category === 'printer') || (item.category === '출력') || ['laser', 'inkjet', '복합기'].includes(item.subtype);
 
-  const bw_cur   = cur?.bw ?? null;
-  const co_cur   = cur?.color ?? null;
-  const up_cur   = cur?.uptime_hours ?? null;
-  const bw_prev  = prev?.bw ?? null;
-  const co_prev  = prev?.color ?? null;
+  const bw_cur  = cur?.bw ?? null;
+  const co_cur  = cur?.color ?? null;
+  const bw_prev = prev?.bw ?? null;
+  const co_prev = prev?.color ?? null;
 
-  const bw_inc = (bw_cur != null && bw_prev != null) ? Math.max(0, bw_cur - bw_prev) : null;
-  const co_inc = (co_cur != null && co_prev != null) ? Math.max(0, co_cur - co_prev) : null;
+  // 월카운터 = max(0, 당월 - 전월)
+  const bw_month = (bw_cur != null && bw_prev != null) ? Math.max(0, bw_cur - bw_prev) : null;
+  const co_month = (co_cur != null && co_prev != null) ? Math.max(0, co_cur - co_prev) : null;
 
-  // 이전 6개월 평균 증가량 (cur 직전 6개)
+  // 추가카운터 = max(0, 월카운터 - 기본매수)
+  const bw_extra = bw_month != null ? Math.max(0, bw_month - (item.bw_free || 0)) : null;
+  const co_extra = co_month != null ? Math.max(0, co_month - (item.co_free || 0)) : null;
+
+  // 추가사용료 = 추가카운터 × 추가사용단가
+  const bw_charge = bw_extra != null ? bw_extra * (item.bw_rate || 0) : null;
+  const co_charge = co_extra != null ? co_extra * (item.co_rate || 0) : null;
+
+  // 이전 6개월 평균 증가량 (이상치 탐지용)
   const avgBW = avgIncrease(hist, 'bw');
   const avgCO = avgIncrease(hist, 'color');
-  const anomaly =
-    (bw_inc != null && avgBW > 0 && bw_inc > avgBW * 3) ||
-    (co_inc != null && avgCO > 0 && co_inc > avgCO * 3);
-
-  // 소모품 잔여 예측
-  const supplyForecast = forecastSupply(item, bw_inc, co_inc);
+  const bwAnomaly = bw_month != null && avgBW > 0 && bw_month > avgBW * 3;
+  const coAnomaly = co_month != null && avgCO > 0 && co_month > avgCO * 3;
+  const anomaly = bwAnomaly || coAnomaly;
 
   return {
-    item, cur, prev, isMeter, isUptime,
-    bw_prev, bw_cur, bw_inc,
-    co_prev, co_cur, co_inc,
-    up_cur,
+    item, cur, prev, isMeter,
+    bw_prev, bw_cur, bw_month, bw_extra, bw_charge, bwAnomaly,
+    co_prev, co_cur, co_month, co_extra, co_charge, coAnomaly,
     avgBW, avgCO,
     anomaly,
-    supplyForecast,
     missing: !cur,
   };
 }
@@ -303,58 +384,87 @@ function forecastSupply(item, bw_inc, co_inc) {
 function renderRow(r) {
   const it = r.item;
   const rowId = it.id;
-  const meterCells = r.isUptime && !r.isMeter
-    ? `
-      <td class="num" style="text-align:right; color:#94a3b8;">N/A</td>
-      <td class="num" style="text-align:right; color:#94a3b8;">N/A</td>
-      <td class="num" style="text-align:right; color:#94a3b8;">N/A</td>
-      <td class="num" style="text-align:right; color:#94a3b8;">N/A</td>
-      <td class="num" style="text-align:right; color:#94a3b8;">N/A</td>
-      <td class="num" style="text-align:right; color:#94a3b8;">N/A</td>
-    `
-    : `
-      <td class="num" style="text-align:right; color:#64748b;">${fmt(r.bw_prev)}</td>
-      <td class="num" style="text-align:right;">
-        <input type="number" class="cell-edit num" data-item="${escapeAttr(rowId)}" data-field="bw" value="${r.bw_cur ?? ''}" placeholder="–">
-      </td>
-      <td class="num" style="text-align:right; ${r.anomaly && r.bw_inc != null && r.avgBW > 0 && r.bw_inc > r.avgBW * 3 ? 'color:#dc2626;font-weight:600;' : ''}">${fmt(r.bw_inc)}</td>
-      <td class="num" style="text-align:right; color:#64748b;">${fmt(r.co_prev)}</td>
-      <td class="num" style="text-align:right;">
-        <input type="number" class="cell-edit num" data-item="${escapeAttr(rowId)}" data-field="color" value="${r.co_cur ?? ''}" placeholder="–">
-      </td>
-      <td class="num" style="text-align:right; ${r.anomaly && r.co_inc != null && r.avgCO > 0 && r.co_inc > r.avgCO * 3 ? 'color:#dc2626;font-weight:600;' : ''}">${fmt(r.co_inc)}</td>
-    `;
+  const dateLabel = state.ym ? `${Number(state.ym.split('-')[1])}월` : '–';
+  const subtag = it.subtype ? ` <span class="muted-small">/${escapeHtml(it.subtype)}</span>` : '';
 
-  const uptimeCell = r.isUptime
-    ? `<td class="num" style="text-align:right;"><input type="number" class="cell-edit num" data-item="${escapeAttr(rowId)}" data-field="uptime_hours" value="${r.up_cur ?? ''}" placeholder="–"></td>`
-    : `<td class="num" style="text-align:right; color:#94a3b8;">–</td>`;
+  // 거래처 옵션 (합산 청구 + 청구 주기) — 첫 행에만 표시
+  const cid = it.customer_id;
+  const showCombine = r._isCustomerFirst && cid && (state.itemsPerCustomer[cid] || 0) >= 2;
+  const combined = !!state.customerCombined[cid];
+  const period   = Number(state.customerPeriod[cid]) || 1;
+  const combineHTML = showCombine
+    ? `<label class="bill-combine-toggle ${combined ? 'on' : ''}" title="여러 자산 합산하여 청구">
+         <input type="checkbox" class="bill-combined-chk" data-cid="${escapeAttr(cid)}" ${combined ? 'checked' : ''}>
+         ${combined ? '합산 청구 ON' : '합산 청구'}
+       </label>`
+    : '';
+  const periodHTML = (r._isCustomerFirst && cid)
+    ? `<select class="bill-period-sel ${period > 1 ? 'on' : ''}" data-cid="${escapeAttr(cid)}" title="청구 주기">
+         <option value="1"  ${period===1?'selected':''}>월별</option>
+         <option value="3"  ${period===3?'selected':''}>3개월</option>
+         <option value="6"  ${period===6?'selected':''}>6개월</option>
+         <option value="12" ${period===12?'selected':''}>1년</option>
+       </select>`
+    : '';
+  const optsHTML = (combineHTML || periodHTML)
+    ? `<div class="bill-options">${combineHTML}${periodHTML}</div>`
+    : '';
+  const customerLine = r._isCustomerFirst
+    ? `<div style="font-weight:600;">${escapeHtml(it.customer_name)}</div>${optsHTML}`
+    : `<div class="muted-small" style="color:#94a3b8;">↳ ${escapeHtml(it.customer_name)}</div>`;
 
-  // 경고/예측 셀
-  const badges = [];
-  if (r.anomaly) badges.push(`<span style="color:#dc2626; font-weight:600;" title="이전 6개월 평균의 3배 초과">🔴 이상치</span>`);
-  for (const f of (r.supplyForecast || [])) {
-    if (f.days == null) continue;
-    if (f.days <= 30) {
-      badges.push(`<span style="color:#d97706;" title="${escapeAttr(f.kind)} 교체 ${f.days}일 이내">⚠ ${escapeHtml(f.kind)} ${f.days}일</span>`);
-    }
+  // 출력기기가 아니면 흑백/컬러 셀 모두 N/A 처리
+  if (!r.isMeter) {
+    const dash = `<td class="num grp-bw dim">N/A</td>`;
+    const dash2 = `<td class="num grp-co dim">N/A</td>`;
+    return `
+      <tr data-row="${escapeAttr(rowId)}">
+        <td>
+          ${customerLine}
+          <div class="muted-small">${escapeHtml(it.brand || '')} ${escapeHtml(it.model || rowId)}${subtag}</div>
+        </td>
+        <td style="text-align:center; color:#64748b;">${dateLabel}</td>
+        ${dash.repeat(7)}
+        ${dash2.repeat(7)}
+      </tr>`;
   }
-  const warnCell = badges.length
-    ? `<td>${badges.join(' · ')}</td>`
-    : `<td class="muted-small">정상</td>`;
 
-  const subtag = it.subtype ? `<span class="muted-small">/${escapeHtml(it.subtype)}</span>` : '';
-  const meterTag = r.isMeter ? '🖨' : (r.isUptime ? '💻' : '📦');
+  const bwAnomStyle = r.bwAnomaly ? 'color:#dc2626;font-weight:600;' : '';
+  const coAnomStyle = r.coAnomaly ? 'color:#dc2626;font-weight:600;' : '';
+
+  const bwCells = `
+    <td class="num grp-bw" style="color:#64748b;">${fmt(r.bw_prev)}</td>
+    <td class="num grp-bw">
+      <input type="number" class="cell-edit num" data-item="${escapeAttr(rowId)}" data-field="bw" value="${r.bw_cur ?? ''}" placeholder="–">
+    </td>
+    <td class="num grp-bw dim">${fmt(it.bw_free)}</td>
+    <td class="num grp-bw" style="${bwAnomStyle}">${r.bwAnomaly ? '🔴 ' : ''}${fmt(r.bw_month)}</td>
+    <td class="num grp-bw">${fmt(r.bw_extra)}</td>
+    <td class="num grp-bw dim">${fmt(it.bw_rate)}</td>
+    <td class="num grp-bw charge">${fmt(r.bw_charge)}</td>
+  `;
+
+  const coCells = `
+    <td class="num grp-co" style="color:#64748b;">${fmt(r.co_prev)}</td>
+    <td class="num grp-co">
+      <input type="number" class="cell-edit num" data-item="${escapeAttr(rowId)}" data-field="color" value="${r.co_cur ?? ''}" placeholder="–">
+    </td>
+    <td class="num grp-co dim">${fmt(it.co_free)}</td>
+    <td class="num grp-co" style="${coAnomStyle}">${r.coAnomaly ? '🔴 ' : ''}${fmt(r.co_month)}</td>
+    <td class="num grp-co">${fmt(r.co_extra)}</td>
+    <td class="num grp-co dim">${fmt(it.co_rate)}</td>
+    <td class="num grp-co charge">${fmt(r.co_charge)}</td>
+  `;
 
   return `
     <tr data-row="${escapeAttr(rowId)}">
       <td>
-        <div style="font-weight:600;">${escapeHtml(it.customer_name)}</div>
-        <div class="muted-small">${escapeHtml(it.brand || '')} ${escapeHtml(it.model || rowId)}</div>
+        ${customerLine}
+        <div class="muted-small">🖨 ${escapeHtml(it.brand || '')} ${escapeHtml(it.model || rowId)}${subtag}</div>
       </td>
-      <td style="text-align:center;">${meterTag} <span class="muted-small">${escapeHtml(it.category || '')}${subtag ? ' ' + subtag : ''}</span></td>
-      ${meterCells}
-      ${uptimeCell}
-      ${warnCell}
+      <td style="text-align:center; color:#64748b;">${dateLabel}</td>
+      ${bwCells}
+      ${coCells}
     </tr>
   `;
 }
@@ -367,6 +477,73 @@ function attachCellHandlers() {
       if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
     });
   });
+  // 합산 청구 체크박스
+  document.querySelectorAll('input.bill-combined-chk').forEach(chk => {
+    chk.addEventListener('change', onCombinedToggle);
+    chk.addEventListener('click', e => e.stopPropagation());
+  });
+  // 청구 주기 드롭다운
+  document.querySelectorAll('select.bill-period-sel').forEach(sel => {
+    sel.addEventListener('change', onPeriodChange);
+    sel.addEventListener('click', e => e.stopPropagation());
+  });
+}
+
+async function onPeriodChange(e) {
+  const sel = e.currentTarget;
+  const cid = sel.dataset.cid;
+  const newVal = parseInt(sel.value, 10) || 1;
+  const prevVal = Number(state.customerPeriod[cid]) || 1;
+  state.customerPeriod[cid] = newVal;
+  try {
+    const { error } = await supa.from('rental_customers')
+      .update({ billing_months: newVal }).eq('id', cid);
+    if (error) throw error;
+    const label = { 1: '월별', 3: '3개월', 6: '6개월', 12: '1년' }[newVal] || `${newVal}개월`;
+    toast(`청구 주기: ${label}`);
+    render();
+    // 월별 거래처만 자동 청구 갱신 (다개월 거래처는 청구 페이지에서 발행)
+    if (newVal === 1) {
+      autoUpdateBillings([cid], { silent: true }).catch(err =>
+        console.warn('[billing-sync] period change', err));
+    }
+  } catch (err) {
+    console.error(err);
+    state.customerPeriod[cid] = prevVal;
+    sel.value = String(prevVal);
+    if (/column .* does not exist/i.test(err.message || '')) {
+      toast('18_add_billing_period.sql 을 먼저 실행해 주세요', true);
+    } else {
+      toast('청구 주기 저장 실패: ' + (err.message || err), true);
+    }
+  }
+}
+
+async function onCombinedToggle(e) {
+  const cid = e.currentTarget.dataset.cid;
+  const newVal = e.currentTarget.checked;
+  const prevVal = !!state.customerCombined[cid];
+  state.customerCombined[cid] = newVal; // 낙관적 업데이트
+  try {
+    const { error } = await supa.from('rental_customers')
+      .update({ bill_combined: newVal }).eq('id', cid);
+    if (error) throw error;
+    toast(newVal ? '합산 청구 ON' : '합산 청구 OFF');
+    render(); // 토글 라벨 갱신
+    // 청구서 자동 재계산
+    autoUpdateBillings([cid], { silent: true }).catch(err => {
+      console.warn('[billing-sync] combined toggle', err);
+    });
+  } catch (err) {
+    console.error(err);
+    state.customerCombined[cid] = prevVal;
+    e.currentTarget.checked = prevVal;
+    if (/column .* does not exist/i.test(err.message || '')) {
+      toast('17_add_bill_combined.sql 을 먼저 실행해 주세요', true);
+    } else {
+      toast('합산 청구 저장 실패: ' + (err.message || err), true);
+    }
+  }
 }
 
 let saveTimer = null;
@@ -402,16 +579,99 @@ async function onCellChange(e) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => render(), 250);
     toast('저장됨');
+
+    // 청구서 자동 갱신 (해당 거래처)
+    const item = state.items.find(i => i.id === itemId);
+    if (item?.customer_id) {
+      autoUpdateBillings([item.customer_id], { silent: true }).catch(e =>
+        console.warn('[billing-sync] cell update fail', e)
+      );
+    }
   } catch (err) {
     console.error(err);
     toast('저장 실패: ' + (err.message || err), true);
   }
 }
 
+// ---------- 드릴다운 ----------
+const DRILL_TITLES = {
+  new:     '🆕 이번달 신규 입력 업체',
+  entered: '✔ 카운터 입력된 업체',
+  missing: '⚠ 입력 안된 업체',
+  anomaly: '🔴 이상치 경고 업체',
+};
+
+function toggleDrilldown(key) {
+  if (state.activeDrilldown === key) return closeDrilldown();
+  state.activeDrilldown = key;
+  document.querySelectorAll('#stats .stat-card').forEach(c => {
+    c.classList.toggle('active', c.dataset.drill === key);
+  });
+  document.getElementById('drilldown').style.display = '';
+  renderDrilldown(key);
+}
+function closeDrilldown() {
+  state.activeDrilldown = null;
+  document.querySelectorAll('#stats .stat-card').forEach(c => c.classList.remove('active'));
+  document.getElementById('drilldown').style.display = 'none';
+}
+function renderDrilldown(key) {
+  const list = state.drilldown?.[key] || [];
+  document.getElementById('drilldown-title').textContent =
+    `${DRILL_TITLES[key] || '업체 목록'} (${list.length})`;
+  const body = document.getElementById('drilldown-body');
+  if (!list.length) {
+    body.innerHTML = `<div class="drilldown-empty">해당하는 업체가 없습니다.</div>`;
+    return;
+  }
+  const isAnomaly = key === 'anomaly';
+  body.innerHTML = `
+    <table class="drilldown-table">
+      <thead><tr>
+        <th>업체</th>
+        <th class="num">자산</th>
+        <th class="num">입력</th>
+        <th class="num">흑백 합계</th>
+        <th class="num">컬러 합계</th>
+        ${isAnomaly ? '<th>이상치 자산</th>' : ''}
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${list.map(cs => `
+          <tr class="drilldown-row" data-cid="${escapeAttr(cs.id)}">
+            <td><b>${escapeHtml(cs.name)}</b></td>
+            <td class="num">${cs.items.length}</td>
+            <td class="num">${cs.enteredItems.length}</td>
+            <td class="num">${cs.bwTotal.toLocaleString()}</td>
+            <td class="num">${cs.coTotal.toLocaleString()}</td>
+            ${isAnomaly ? `<td>${cs.anomalies.map(a => escapeHtml((a.item.brand||'') + ' ' + (a.item.model||a.item.id))).join('<br>')}</td>` : ''}
+            <td><span class="muted-small">필터 →</span></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  body.querySelectorAll('.drilldown-row').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const cid = tr.dataset.cid;
+      const sel = document.getElementById('f-customer');
+      if (sel) sel.value = cid;
+      state.customerId = cid;
+      render();
+      const card = document.querySelector('.counters-card');
+      if (card) window.scrollTo({ top: card.offsetTop - 20, behavior: 'smooth' });
+    });
+  });
+}
+
 // ---------- utils ----------
 function setBodyLoading() {
   document.getElementById('grid-body').innerHTML =
-    '<tr><td colspan="10" class="muted-small" style="text-align:center; padding:30px;">데이터 로딩 중…</td></tr>';
+    '<tr><td colspan="16" class="muted-small" style="text-align:center; padding:30px;">데이터 로딩 중…</td></tr>';
+}
+function updateYearHeader() {
+  const el = document.getElementById('hdr-year');
+  if (el && state.ym) el.textContent = state.ym.split('-')[0];
 }
 function ymOfNow() {
   const d = new Date();
@@ -488,7 +748,7 @@ function initExcelImport() {
     save.disabled = true;
   });
 
-  save.addEventListener('click', saveExcelBatch);
+  save.addEventListener('click', () => saveExcelBatch({ auto: false }));
 
   updateExcelTargetYm();
 }
@@ -536,7 +796,15 @@ async function handleExcelFile(file) {
 
     rematchExcelRows();
     document.getElementById('excel-preview').classList.remove('hidden');
-    toast(`${excelState.rows.length}행 로드됨`);
+
+    // 자동 분석 결과 안내 + 자동 저장
+    const okCount = excelState.rows.filter(r => r.status === 'ok' && r.itemId).length;
+    if (okCount > 0) {
+      toast(`📥 ${excelState.rows.length}행 로드 · ${okCount}건 자동 저장 중…`);
+      await saveExcelBatch({ auto: true });
+    } else {
+      toast(`📥 ${excelState.rows.length}행 로드 · 자동 매칭 0건 — 아래 미리보기에서 자산을 직접 선택하세요.`, true);
+    }
   } catch (err) {
     console.error(err);
     toast('파일 읽기 실패: ' + (err.message || err), true);
@@ -616,7 +884,7 @@ function renderExcelPreview() {
   let ok = 0, warn = 0, fail = 0;
 
   tbody.innerHTML = rows.map(r => {
-    if (r.status === 'ok')   ok++;
+    if (r.status === 'ok' || r.status === 'saved') ok++;
     if (r.status === 'warn') warn++;
     if (r.status === 'fail') fail++;
 
@@ -642,9 +910,10 @@ function renderExcelPreview() {
       : `<span style="color:#dc2626;">매칭 실패</span>`;
 
     const statusBadge =
-      r.status === 'ok'   ? `<span class="excel-badge ok">✔ 매칭</span>`
-    : r.status === 'warn' ? `<span class="excel-badge warn">⚠ ${escapeHtml(r.note || '확인필요')}</span>`
-                          : `<span class="excel-badge fail">✖ ${escapeHtml(r.note || '실패')}</span>`;
+      r.status === 'saved' ? `<span class="excel-badge ok">💾 저장됨</span>`
+    : r.status === 'ok'    ? `<span class="excel-badge ok">✔ 매칭</span>`
+    : r.status === 'warn'  ? `<span class="excel-badge warn">⚠ ${escapeHtml(r.note || '확인필요')}</span>`
+                           : `<span class="excel-badge fail">✖ ${escapeHtml(r.note || '실패')}</span>`;
 
     return `
       <tr class="excel-row excel-row-${r.status}">
@@ -683,13 +952,16 @@ function renderExcelPreview() {
   });
 }
 
-async function saveExcelBatch() {
+async function saveExcelBatch({ auto = false } = {}) {
   const targets = excelState.rows.filter(r => r.status === 'ok' && r.itemId);
-  if (!targets.length) { toast('저장할 행이 없습니다', true); return; }
+  if (!targets.length) {
+    if (!auto) toast('저장할 행이 없습니다', true);
+    return;
+  }
 
   const btn = document.getElementById('btn-excel-save');
   btn.disabled = true;
-  btn.textContent = '저장 중…';
+  btn.textContent = auto ? '자동 저장 중…' : '저장 중…';
 
   try {
     const now = new Date().toISOString();
@@ -711,15 +983,40 @@ async function saveExcelBatch() {
     if (error) throw error;
 
     for (const p of payloads) state.curMap[p.item_id] = p;
-    toast(`${payloads.length}건 저장됨`);
+    // 저장된 행 상태 표시
+    for (const r of targets) r.status = 'saved';
+
+    const failCount = excelState.rows.filter(r => r.status !== 'saved' && r.status !== 'ok').length;
+    const warnCount = excelState.rows.filter(r => r.status === 'warn').length;
+    if (auto) {
+      const parts = [`✔ ${payloads.length}건 자동 저장`];
+      if (warnCount) parts.push(`⚠ ${warnCount}건 확인 필요`);
+      if (failCount) parts.push(`✖ ${failCount}건 실패`);
+      toast(parts.join(' · '), warnCount + failCount > 0);
+    } else {
+      toast(`${payloads.length}건 저장됨`);
+    }
     render();
     renderExcelPreview();
+
+    // 청구서 자동 갱신 (영향받은 거래처 일괄)
+    const affected = [];
+    for (const p of payloads) {
+      const it = state.items.find(i => i.id === p.item_id);
+      if (it?.customer_id) affected.push(it.customer_id);
+    }
+    if (affected.length) {
+      autoUpdateBillings(affected, { silent: auto }).catch(e => {
+        console.warn('[billing-sync] batch fail', e);
+        if (!auto) toast('청구서 자동 갱신 실패', true);
+      });
+    }
   } catch (err) {
     console.error(err);
     toast('일괄 저장 실패: ' + (err.message || err), true);
   } finally {
     btn.disabled = false;
-    btn.textContent = '💾 최종 저장';
+    btn.textContent = '💾 추가 저장';
   }
 }
 
@@ -727,6 +1024,191 @@ function toNum(v) {
   if (v === '' || v == null) return null;
   const n = Number(String(v).replace(/,/g, ''));
   return Number.isFinite(n) ? n : null;
+}
+
+// ===========================================================
+// 청구서 자동 동기화 (카운터 → rental_billings)
+// rental-billing/index.js 의 computeBilling 로직을 미러링.
+// sent / paid / void 상태는 잠금 → 건너뜀, 그 외는 draft 로 upsert.
+// ===========================================================
+const BILLING_FIXED_CATS = ['IT', '위생', '출력'];
+const BILLING_LOCKED_STATUSES = new Set(['sent', 'paid', 'void']);
+
+function computeCustomerBilling(customerId) {
+  const myItems = state.items.filter(it => it.customer_id === customerId);
+  const combined = !!state.customerCombined[customerId];
+  const fixedItems = [];
+  const usageItems = [];
+
+  // 고정비 (IT/위생/출력 monthly_fee)
+  for (const it of myItems) {
+    const cat = it.category;
+    if (BILLING_FIXED_CATS.includes(cat) && (it.monthly_fee || 0) > 0) {
+      fixedItems.push({
+        item_id: it.id,
+        kind: 'fixed',
+        category: cat,
+        subtype: it.subtype,
+        label: `${cat}/${it.subtype}${it.model ? ' ' + it.model : ''}`,
+        qty: 1,
+        unit_price: it.monthly_fee || 0,
+        subtotal: it.monthly_fee || 0,
+      });
+    }
+  }
+
+  // 출력 사용량
+  const printItems = myItems.filter(it => it.category === '출력');
+
+  if (combined && printItems.length >= 2) {
+    // === 합산 모드: 자산별 월카운터를 합산해 한 항목으로 ===
+    let monthBwT = 0, monthCoT = 0, bwFreeT = 0, coFreeT = 0;
+    let curBwT = 0, curCoT = 0, prevBwT = 0, prevCoT = 0;
+    let bwRate = 0, coRate = 0;
+    const itemIds = [];
+    const labels = [];
+    for (const it of printItems) {
+      const cnt  = state.curMap[it.id]  || { bw: 0, color: 0 };
+      const prev = state.prevMap[it.id] || { bw: 0, color: 0 };
+      const monthBw = Math.max(0, (cnt.bw    || 0) - (prev.bw    || 0));
+      const monthCo = Math.max(0, (cnt.color || 0) - (prev.color || 0));
+      monthBwT += monthBw; monthCoT += monthCo;
+      bwFreeT  += it.bw_free || 0; coFreeT  += it.co_free || 0;
+      curBwT   += cnt.bw   || 0; curCoT   += cnt.color || 0;
+      prevBwT  += prev.bw  || 0; prevCoT  += prev.color || 0;
+      if (!bwRate) bwRate = it.bw_rate || 0;
+      if (!coRate) coRate = it.co_rate || 0;
+      itemIds.push(it.id);
+      labels.push(`${it.subtype || ''}${it.model ? ' '+it.model : ''}`.trim());
+    }
+    const exBw = Math.max(0, monthBwT - bwFreeT);
+    const exCo = Math.max(0, monthCoT - coFreeT);
+    const sub  = exBw * bwRate + exCo * coRate;
+    if (sub > 0) {
+      usageItems.push({
+        item_id: itemIds.join(','),
+        kind: 'usage',
+        category: '출력',
+        subtype: 'combined',
+        label: `출력 합산 (${printItems.length}대: ${labels.filter(Boolean).join(' + ')}) 초과사용`,
+        bw: exBw,
+        co: exCo,
+        month_bw: monthBwT,
+        month_co: monthCoT,
+        bw_rate: bwRate,
+        co_rate: coRate,
+        counter_bw_prev: prevBwT,
+        counter_color_prev: prevCoT,
+        counter_bw: curBwT,
+        counter_color: curCoT,
+        bw_free: bwFreeT,
+        co_free: coFreeT,
+        subtotal: sub,
+        combined: true,
+      });
+    }
+  } else {
+    // === 자산별 모드 ===
+    for (const it of printItems) {
+      const cnt  = state.curMap[it.id]  || { bw: 0, color: 0 };
+      const prev = state.prevMap[it.id] || { bw: 0, color: 0 };
+      const monthBw = Math.max(0, (cnt.bw    || 0) - (prev.bw    || 0));
+      const monthCo = Math.max(0, (cnt.color || 0) - (prev.color || 0));
+      const exBw = Math.max(0, monthBw - (it.bw_free || 0));
+      const exCo = Math.max(0, monthCo - (it.co_free || 0));
+      const sub = exBw * (it.bw_rate || 0) + exCo * (it.co_rate || 0);
+      if (sub > 0) {
+        usageItems.push({
+          item_id: it.id,
+          kind: 'usage',
+          category: '출력',
+          subtype: it.subtype,
+          label: `${it.subtype}${it.model ? ' ' + it.model : ''} 초과사용`,
+          bw: exBw,
+          co: exCo,
+          month_bw: monthBw,
+          month_co: monthCo,
+          bw_rate: it.bw_rate || 0,
+          co_rate: it.co_rate || 0,
+          counter_bw_prev: prev.bw || 0,
+          counter_color_prev: prev.color || 0,
+          counter_bw: cnt.bw || 0,
+          counter_color: cnt.color || 0,
+          bw_free: it.bw_free || 0,
+          co_free: it.co_free || 0,
+          subtotal: sub,
+        });
+      }
+    }
+  }
+
+  const fixed_total = fixedItems.reduce((s, x) => s + x.subtotal, 0);
+  const usage_total = usageItems.reduce((s, x) => s + x.subtotal, 0);
+  return {
+    fixed_total,
+    usage_total,
+    total: fixed_total + usage_total,
+    items: [...fixedItems, ...usageItems],
+    combined,
+  };
+}
+
+async function autoUpdateBillings(customerIds, { silent = false } = {}) {
+  // 다개월 거래처(분기/반기/연간)는 카운터 페이지에서 자동 갱신하지 않음
+  // (정확한 N개월 합산은 청구 페이지에서 발행)
+  const uniq = [...new Set((customerIds || []).filter(Boolean))]
+    .filter(cid => (Number(state.customerPeriod[cid]) || 1) === 1);
+  if (!uniq.length) return { ok: 0, skipped: 0, empty: 0 };
+
+  const ym = state.ym;
+
+  // 기존 청구서 상태 조회
+  const { data: existRows, error: exErr } = await supa.from('rental_billings')
+    .select('id, customer_id, ym, status')
+    .eq('ym', ym)
+    .in('customer_id', uniq);
+  if (exErr) throw exErr;
+
+  const existMap = new Map();
+  for (const b of (existRows || [])) existMap.set(b.customer_id, b);
+
+  const rows = [];
+  let skipped = 0, empty = 0;
+
+  for (const cid of uniq) {
+    const ex = existMap.get(cid);
+    if (ex && BILLING_LOCKED_STATUSES.has(ex.status)) { skipped++; continue; }
+
+    const calc = computeCustomerBilling(cid);
+    // 추가요금(usage)이 발생한 거래처만 청구서 발행
+    if ((calc.usage_total || 0) <= 0) { empty++; continue; }
+
+    rows.push({
+      id: `b_${cid}_${ym}`,
+      customer_id: cid,
+      ym,
+      fixed_total: calc.fixed_total,
+      usage_total: calc.usage_total,
+      items: calc.items,
+      status: ex?.status || 'draft',
+    });
+  }
+
+  if (!rows.length) {
+    if (!silent) toast(`청구서 갱신 대상 없음 (잠금 ${skipped}건)`);
+    return { ok: 0, skipped, empty };
+  }
+
+  const { error: upErr } = await supa.from('rental_billings')
+    .upsert(rows, { onConflict: 'customer_id,ym' });
+  if (upErr) throw upErr;
+
+  if (!silent) {
+    const parts = [`청구서 ${rows.length}건 자동 갱신`];
+    if (skipped) parts.push(`잠긴 ${skipped}건 스킵`);
+    toast(parts.join(' · '));
+  }
+  return { ok: rows.length, skipped, empty };
 }
 
 let toastTimer = null;

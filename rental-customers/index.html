@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>임대거래처 — 한별시스템</title>
-<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../styles.css?v=20260513l">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="../config.js"></script>
 <script src="../auth.js"></script>
@@ -798,29 +798,59 @@
     </div>
   </div>
 
-  <!-- 통계 카드 -->
-  <section class="stats">
-    <div class="stat-card">
+  <!-- 통계 카드 (클릭하면 아래 거래처 목록 펼침) -->
+  <section class="stats stats-clickable rc-stats-grid" id="rc-stats">
+    <div class="stat-card" data-cust-filter="active">
       <div class="stat-label">활성 거래처</div>
-      <div class="stat-value" id="s-total">—</div>
+      <div class="stat-value primary" id="s-total">—</div>
       <div class="stat-sub muted" id="s-total-sub">로드 중…</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">PC+모니터 세트</div>
-      <div class="stat-value" id="s-pc-set">—</div>
-      <div class="stat-sub muted">PC만 보유 → 모니터 제안</div>
+    <div class="stat-card" data-cust-filter="bw_mfp">
+      <div class="stat-label">흑백 복사기</div>
+      <div class="stat-value" id="s-bw-mfp">—</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">웰리스 제안 대상</div>
+    <div class="stat-card" data-cust-filter="color_mfp">
+      <div class="stat-label">컬러 복사기</div>
+      <div class="stat-value" id="s-color-mfp">—</div>
+    </div>
+    <div class="stat-card" data-cust-filter="bw_laser">
+      <div class="stat-label">흑백 레이저</div>
+      <div class="stat-value" id="s-bw-laser">—</div>
+    </div>
+    <div class="stat-card" data-cust-filter="color_laser">
+      <div class="stat-label">컬러 레이저</div>
+      <div class="stat-value" id="s-color-laser">—</div>
+    </div>
+    <div class="stat-card" data-cust-filter="inkjet">
+      <div class="stat-label">잉크젯</div>
+      <div class="stat-value" id="s-inkjet">—</div>
+    </div>
+    <div class="stat-card" data-cust-filter="pc">
+      <div class="stat-label">컴퓨터</div>
+      <div class="stat-value" id="s-pc">—</div>
+    </div>
+    <div class="stat-card" data-cust-filter="monitor">
+      <div class="stat-label">모니터</div>
+      <div class="stat-value" id="s-monitor">—</div>
+    </div>
+    <div class="stat-card" data-cust-filter="wellness">
+      <div class="stat-label">웰리스</div>
       <div class="stat-value" id="s-wellness">—</div>
-      <div class="stat-sub muted">출력기기 보유 / 웰리스 미보유</div>
     </div>
-    <div class="stat-card">
-      <div class="stat-label">NAS 후보</div>
-      <div class="stat-value" id="s-nas" style="color:#9d174d;">—</div>
-      <div class="stat-sub muted">월평균 3000장+ 또는 복합기 보유</div>
+    <div class="stat-card" data-cust-filter="nas">
+      <div class="stat-label">나스</div>
+      <div class="stat-value" id="s-nas">—</div>
     </div>
   </section>
+
+  <!-- 드릴다운 패널 -->
+  <div class="card drilldown-card" id="rc-drilldown" style="display:none;">
+    <div class="drilldown-head">
+      <strong id="rc-drilldown-title">거래처 목록</strong>
+      <button class="btn ghost small" id="rc-drilldown-close" type="button">✕ 닫기</button>
+    </div>
+    <div id="rc-drilldown-body"></div>
+  </div>
 
   <div class="rc-layout">
     <!-- 좌측: 거래처 리스트 -->
@@ -1053,6 +1083,6 @@
   </form>
 </template>
 
-<script src="index.js?v=20260513g"></script>
+<script src="index.js?v=20260513l"></script>
 </body>
 </html>

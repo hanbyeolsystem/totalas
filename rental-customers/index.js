@@ -9,6 +9,7 @@ const STATE = {
   customers: [],         // 가공된 거래처 배열
   countersByItem: {},    // { item_id: [{ym, bw, color}, ...] }
   selectedId: null,
+  activeDrill: null,     // 상단 통계 카드 드릴다운 필터 키
   filters: {
     q: '',
     sort: 'name',
@@ -89,6 +90,14 @@ if (window.totalasAuth) {
 }
 
 function bindUI() {
+  // 상단 통계 카드 → 드릴다운 토글
+  document.querySelectorAll('#rc-stats .stat-card[data-cust-filter]').forEach(card => {
+    card.addEventListener('click', () => {
+      toggleCustDrilldown(card.dataset.custFilter);
+    });
+  });
+  document.getElementById('rc-drilldown-close')?.addEventListener('click', closeCustDrilldown);
+
   document.getElementById('rc-search').addEventListener('input', (e) => {
     STATE.filters.q = e.target.value.trim();
     renderList();
@@ -211,6 +220,23 @@ function enrichCustomer(c) {
   const hasNAS     = [...subtypes].some(s => /nas/i.test(s));
   const hasMFP     = [...subtypes].some(s => /복합기|mfp/i.test(s));
 
+  // 기기 세분류 (출력기기는 흑백/컬러 분리 — assignment.co_rate>0 또는 co_free>0 이면 컬러)
+  let hasBwMfp = false, hasColorMfp = false;
+  let hasBwLaser = false, hasColorLaser = false;
+  let hasInkjet = false;
+  active.forEach(a => {
+    const it = a.rental_items;
+    const sub = (it.subtype || '').toLowerCase();
+    const isColor = ((a.co_rate || 0) > 0) || ((a.co_free || 0) > 0);
+    if (/복합기|mfp|복사/.test(sub)) {
+      if (isColor) hasColorMfp = true; else hasBwMfp = true;
+    } else if (/laser|레이저/.test(sub)) {
+      if (isColor) hasColorLaser = true; else hasBwLaser = true;
+    } else if (/inkjet|잉크젯/.test(sub)) {
+      hasInkjet = true;
+    }
+  });
+
   // 월평균 출력량 (활성 자산의 카운터 합산 — 최근 6개월)
   const recentYm = recentMonths(6);
   let totalPages = 0;
@@ -246,6 +272,11 @@ function enrichCustomer(c) {
     _hasWellis: hasWellis,
     _hasNAS: hasNAS,
     _hasMFP: hasMFP,
+    _hasBwMfp: hasBwMfp,
+    _hasColorMfp: hasColorMfp,
+    _hasBwLaser: hasBwLaser,
+    _hasColorLaser: hasColorLaser,
+    _hasInkjet: hasInkjet,
     _avgPages: avgPagesPerMonth,
     _score: score,
     _isNasCandidate: isNasCandidate,
@@ -269,7 +300,6 @@ function renderStats() {
   const cs = STATE.customers;
   const archived = STATE.filters.mode === 'archived';
 
-  // 활성/만기 모드에 따라 첫 번째 카드 라벨도 변경
   const totalLabel = document.querySelector('#s-total')?.parentElement?.querySelector('.stat-label');
   if (totalLabel) totalLabel.textContent = archived ? '만기 거래처' : '활성 거래처';
 
@@ -278,14 +308,116 @@ function renderStats() {
     ? `만기 처리된 거래처 (데이터 보존)`
     : `총 자산 ${cs.reduce((s,c) => s + c._assignments.length, 0)}건`;
 
-  const pcSetCandidate = cs.filter(c => c._hasPC && !c._hasMonitor).length;
-  document.getElementById('s-pc-set').textContent = pcSetCandidate;
+  // 기기별 보유 거래처 수
+  const setEl = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n.toLocaleString(); };
+  setEl('s-bw-mfp',      cs.filter(c => c._hasBwMfp).length);
+  setEl('s-color-mfp',   cs.filter(c => c._hasColorMfp).length);
+  setEl('s-bw-laser',    cs.filter(c => c._hasBwLaser).length);
+  setEl('s-color-laser', cs.filter(c => c._hasColorLaser).length);
+  setEl('s-inkjet',      cs.filter(c => c._hasInkjet).length);
+  setEl('s-pc',          cs.filter(c => c._hasPC).length);
+  setEl('s-monitor',     cs.filter(c => c._hasMonitor).length);
+  setEl('s-wellness',    cs.filter(c => c._hasWellis).length);
+  setEl('s-nas',         cs.filter(c => c._hasNAS).length);
 
-  const wellisCandidate = cs.filter(c => c._hasOutput && !c._hasWellis).length;
-  document.getElementById('s-wellness').textContent = wellisCandidate;
+  // 드릴다운이 열려있으면 재렌더
+  if (STATE.activeDrill) renderCustDrilldown(STATE.activeDrill);
+}
 
-  const nas = cs.filter(c => c._isNasCandidate).length;
-  document.getElementById('s-nas').textContent = nas;
+// ─────────────────────────────────────────────────────────────
+// 통계 카드 클릭 → 거래처 목록 드릴다운
+// ─────────────────────────────────────────────────────────────
+const CUST_DRILL_LABELS = {
+  active: '활성 거래처',
+  bw_mfp: '🖨 흑백 복사기 보유',
+  color_mfp: '🌈 컬러 복사기 보유',
+  bw_laser: '⚡ 흑백 레이저 보유',
+  color_laser: '🌈 컬러 레이저 보유',
+  inkjet: '💧 잉크젯 보유',
+  pc: '💻 컴퓨터 보유',
+  monitor: '🖥 모니터 보유',
+  wellness: '🌿 웰리스 보유',
+  nas: '💾 나스 보유',
+};
+function filteredCustomersFor(filter) {
+  const cs = STATE.customers;
+  switch (filter) {
+    case 'active':      return cs;
+    case 'bw_mfp':      return cs.filter(c => c._hasBwMfp);
+    case 'color_mfp':   return cs.filter(c => c._hasColorMfp);
+    case 'bw_laser':    return cs.filter(c => c._hasBwLaser);
+    case 'color_laser': return cs.filter(c => c._hasColorLaser);
+    case 'inkjet':      return cs.filter(c => c._hasInkjet);
+    case 'pc':          return cs.filter(c => c._hasPC);
+    case 'monitor':     return cs.filter(c => c._hasMonitor);
+    case 'wellness':    return cs.filter(c => c._hasWellis);
+    case 'nas':         return cs.filter(c => c._hasNAS);
+    default:            return cs;
+  }
+}
+function toggleCustDrilldown(filter) {
+  if (STATE.activeDrill === filter) return closeCustDrilldown();
+  STATE.activeDrill = filter;
+  document.querySelectorAll('#rc-stats .stat-card').forEach(c =>
+    c.classList.toggle('active', c.dataset.custFilter === filter));
+  document.getElementById('rc-drilldown').style.display = '';
+  renderCustDrilldown(filter);
+}
+function closeCustDrilldown() {
+  STATE.activeDrill = null;
+  document.querySelectorAll('#rc-stats .stat-card').forEach(c => c.classList.remove('active'));
+  document.getElementById('rc-drilldown').style.display = 'none';
+}
+function renderCustDrilldown(filter) {
+  const list = filteredCustomersFor(filter);
+  const title = document.getElementById('rc-drilldown-title');
+  if (title) title.textContent = `${CUST_DRILL_LABELS[filter] || '거래처 목록'} (${list.length})`;
+  const body = document.getElementById('rc-drilldown-body');
+  if (!body) return;
+  if (!list.length) {
+    body.innerHTML = `<div class="drilldown-empty">해당하는 거래처가 없습니다.</div>`;
+    return;
+  }
+  // 자산 수 많은 순 → 회사명 순
+  const sorted = list.slice().sort((a, b) => {
+    const da = (b._assignments?.length || 0) - (a._assignments?.length || 0);
+    return da !== 0 ? da : (a.company || '').localeCompare(b.company || '');
+  });
+  body.innerHTML = `
+    <table class="drilldown-table">
+      <thead><tr>
+        <th>회사명</th>
+        <th class="num">자산</th>
+        <th>보유 카테고리</th>
+        <th class="num">월평균 출력</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        ${sorted.map(c => {
+          const cats = [...(c._cats || [])].join(', ') || '–';
+          const avg = Math.round(c._avgPages || 0);
+          return `
+            <tr class="drilldown-row" data-cid="${escapeAttr(c.id)}">
+              <td><b>${escapeHtml(c.company || '(이름 없음)')}</b></td>
+              <td class="num">${c._assignments?.length || 0}</td>
+              <td>${escapeHtml(cats)}</td>
+              <td class="num">${avg.toLocaleString()}</td>
+              <td><span class="muted-small">→ 상세 보기</span></td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+  body.querySelectorAll('.drilldown-row').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const cid = tr.dataset.cid;
+      STATE.selectedId = cid;
+      renderList();
+      renderDetail();
+      const listCard = document.querySelector('.rc-list-card');
+      if (listCard) window.scrollTo({ top: listCard.offsetTop - 20, behavior: 'smooth' });
+    });
+  });
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -15,7 +15,10 @@
     items: new Map(),        // item_id -> {id, category, subtype, brand, model, ...}
     assignments: [],         // [{id, item_id, customer_id, monthly_fee, bw_free, co_free, bw_rate, co_rate, end_date}]
     counters: new Map(),     // `${item_id}|${ym}` -> {bw, color, uptime_hours}
+    prevCounters: new Map(), // item_id -> {bw, color}  (전월 카운터)
     billings: new Map(),     // customer_id -> billing row (for current ym)
+    prevBillingsTotal: 0,    // 지난달 발행 총액 (추가요금 있는 건만)
+    prevBillingsCount: 0,    // 지난달 발행 업체 수
     selectedCustomerId: null,
     filterText: '',
     loading: false,
@@ -68,13 +71,16 @@
     renderDetail();
     try {
       const ym = state.ym;
+      const prevYm = prevMonth(ym);
+      // 최대 12개월 합산 청구를 지원하기 위해 13개월(이번달 + 12개월 전)치 카운터 로드
+      const ymList = ymRange(ym, 13);
       const client = sb();
 
       const [
         rCust, rItems, rAssign, rCnt, rBill,
       ] = await Promise.all([
         client.from('rental_customers')
-          .select('id, company, biz_no, payment_type, invoice_day, address, active')
+          .select('id, company, biz_no, payment_type, invoice_day, address, active, bill_combined, billing_months')
           .eq('active', true)
           .order('company', { ascending: true }),
         client.from('rental_items')
@@ -84,10 +90,10 @@
           .select('id, item_id, customer_id, monthly_fee, bw_free, co_free, bw_rate, co_rate, end_date'),
         client.from('rental_counters')
           .select('item_id, ym, bw, color, uptime_hours')
-          .eq('ym', ym),
+          .in('ym', ymList),
         client.from('rental_billings')
           .select('id, customer_id, ym, fixed_total, usage_total, total, items, status, issued_at, paid_at, notes')
-          .eq('ym', ym),
+          .in('ym', [ym, prevYm]),
       ]);
 
       // 에러 체크
@@ -105,15 +111,32 @@
         !a.end_date || a.end_date >= todayStr
       );
 
-      state.counters = new Map();
+      // 13개월치 카운터를 (item_id|ym) → {bw, color} 맵으로 적재
+      state.allCounters = new Map();
+      state.counters = new Map();      // 이번달용 (호환)
+      state.prevCounters = new Map();  // 직전월용 (호환)
       (rCnt.data || []).forEach((c) => {
-        state.counters.set(`${c.item_id}|${c.ym}`, {
-          bw: c.bw || 0, color: c.color || 0, uptime_hours: c.uptime_hours || 0,
-        });
+        state.allCounters.set(`${c.item_id}|${c.ym}`, { bw: c.bw || 0, color: c.color || 0 });
+        if (c.ym === ym) {
+          state.counters.set(`${c.item_id}|${c.ym}`, {
+            bw: c.bw || 0, color: c.color || 0, uptime_hours: c.uptime_hours || 0,
+          });
+        } else if (c.ym === prevYm) {
+          state.prevCounters.set(c.item_id, { bw: c.bw || 0, color: c.color || 0 });
+        }
       });
 
       state.billings = new Map();
-      (rBill.data || []).forEach((b) => state.billings.set(b.customer_id, b));
+      state.prevBillingsTotal = 0;
+      state.prevBillingsCount = 0;
+      (rBill.data || []).forEach((b) => {
+        if (b.ym === ym) {
+          state.billings.set(b.customer_id, b);
+        } else if (b.ym === prevYm && (b.usage_total || 0) > 0) {
+          state.prevBillingsTotal += b.usage_total || 0;
+          state.prevBillingsCount += 1;
+        }
+      });
 
       setStatusText(`거래처 ${state.customers.length}곳 · 자산 ${state.items.size}건 · 청구 ${state.billings.size}건`);
     } catch (e) {
@@ -131,52 +154,129 @@
   function computeBilling(customerId) {
     const ym = state.ym;
     const myAssigns = state.assignments.filter((a) => a.customer_id === customerId);
+    const customer = state.customers.find((c) => c.id === customerId);
+    const combined = !!customer?.bill_combined;
+    const months   = Math.max(1, Number(customer?.billing_months) || 1);
 
-    // 고정료: IT / 위생 / 출력 카테고리 모두 (출력기기도 기본 임대료 있음)
+    // N개월 합산: 청구 마감월(ym)의 카운터 - (ym - N개월)의 카운터 = 누적 사용량
+    // 기본매수도 N배 확장
+    const startPrevYm = ymMinus(ym, months);
+    const getCnt = (iid, yym) => state.allCounters?.get(`${iid}|${yym}`) || { bw: 0, color: 0 };
+
+    // 고정료: IT / 위생 / 출력 카테고리 모두
     const fixedItems = [];
     const usageItems = [];
+    const FIXED_CATS = ['IT', '위생', '출력'];
 
+    // 고정비 — N개월 청구면 monthly_fee × N
     for (const a of myAssigns) {
       const it = state.items.get(a.item_id);
-      if (!it) continue; // 자산이 returned 등으로 빠졌다면 스킵
-
+      if (!it) continue;
       const cat = it.category;
-      const FIXED_CATS = ['IT', '위생', '출력'];
       if (FIXED_CATS.includes(cat) && (a.monthly_fee || 0) > 0) {
+        const unit = a.monthly_fee || 0;
         fixedItems.push({
           item_id: a.item_id,
           kind: 'fixed',
           category: cat,
           subtype: it.subtype,
-          label: `${cat}/${it.subtype}${it.model ? ' ' + it.model : ''}`,
-          qty: 1,
-          unit_price: a.monthly_fee || 0,
-          subtotal: a.monthly_fee || 0,
+          label: `${cat}/${it.subtype}${it.model ? ' ' + it.model : ''}${months > 1 ? ` (${months}개월 × ₩${unit.toLocaleString()})` : ''}`,
+          qty: months,
+          unit_price: unit,
+          subtotal: unit * months,
         });
       }
+    }
 
-      // 사용량 초과: 출력 카테고리만
-      if (cat === '출력') {
-        const cnt = state.counters.get(`${a.item_id}|${ym}`) || { bw: 0, color: 0 };
-        const exBw = Math.max(0, (cnt.bw || 0) - (a.bw_free || 0));
-        const exCo = Math.max(0, (cnt.color || 0) - (a.co_free || 0));
+    // 출력 사용량 — 합산 모드 ↔ 자산별 모드 (× N개월)
+    const printAssigns = myAssigns
+      .map((a) => ({ a, it: state.items.get(a.item_id) }))
+      .filter((x) => x.it && x.it.category === '출력');
+
+    if (combined && printAssigns.length >= 2) {
+      // === 합산 모드 (여러 자산 묶음 + N개월) ===
+      let periodBwT = 0, periodCoT = 0, bwFreeT = 0, coFreeT = 0;
+      let curBwT = 0, curCoT = 0, prevBwT = 0, prevCoT = 0;
+      let bwRate = 0, coRate = 0;
+      const itemIds = [];
+      const labels = [];
+      for (const { a, it } of printAssigns) {
+        const cnt  = getCnt(a.item_id, ym);
+        const prev = getCnt(a.item_id, startPrevYm);
+        const periodBw = Math.max(0, (cnt.bw    || 0) - (prev.bw    || 0));
+        const periodCo = Math.max(0, (cnt.color || 0) - (prev.color || 0));
+        periodBwT += periodBw; periodCoT += periodCo;
+        bwFreeT  += (a.bw_free || 0) * months;
+        coFreeT  += (a.co_free || 0) * months;
+        curBwT  += cnt.bw  || 0; curCoT  += cnt.color || 0;
+        prevBwT += prev.bw || 0; prevCoT += prev.color || 0;
+        if (!bwRate) bwRate = a.bw_rate || 0;
+        if (!coRate) coRate = a.co_rate || 0;
+        itemIds.push(a.item_id);
+        labels.push(`${it.subtype || ''}${it.model ? ' '+it.model : ''}`.trim());
+      }
+      const exBw = Math.max(0, periodBwT - bwFreeT);
+      const exCo = Math.max(0, periodCoT - coFreeT);
+      const sub  = exBw * bwRate + exCo * coRate;
+      if (sub > 0) {
+        const tag = months > 1 ? ` · ${periodLabel(ym, months)}` : '';
+        usageItems.push({
+          item_id: itemIds.join(','),
+          kind: 'usage',
+          category: '출력',
+          subtype: 'combined',
+          label: `출력 합산 (${printAssigns.length}대: ${labels.filter(Boolean).join(' + ')}) 초과사용${tag}`,
+          bw: exBw,
+          co: exCo,
+          month_bw: periodBwT,
+          month_co: periodCoT,
+          bw_rate: bwRate,
+          co_rate: coRate,
+          counter_bw_prev: prevBwT,
+          counter_color_prev: prevCoT,
+          counter_bw: curBwT,
+          counter_color: curCoT,
+          bw_free: bwFreeT,
+          co_free: coFreeT,
+          subtotal: sub,
+          combined: true,
+          billing_months: months,
+        });
+      }
+    } else {
+      // === 자산별 모드 (자산 1대씩 × N개월) ===
+      for (const { a, it } of printAssigns) {
+        const cnt  = getCnt(a.item_id, ym);
+        const prev = getCnt(a.item_id, startPrevYm);
+        const periodBw = Math.max(0, (cnt.bw    || 0) - (prev.bw    || 0));
+        const periodCo = Math.max(0, (cnt.color || 0) - (prev.color || 0));
+        const freeBw = (a.bw_free || 0) * months;
+        const freeCo = (a.co_free || 0) * months;
+        const exBw = Math.max(0, periodBw - freeBw);
+        const exCo = Math.max(0, periodCo - freeCo);
         const sub = exBw * (a.bw_rate || 0) + exCo * (a.co_rate || 0);
         if (sub > 0) {
+          const tag = months > 1 ? ` · ${periodLabel(ym, months)}` : '';
           usageItems.push({
             item_id: a.item_id,
             kind: 'usage',
-            category: cat,
+            category: '출력',
             subtype: it.subtype,
-            label: `${it.subtype}${it.model ? ' ' + it.model : ''} 초과사용`,
+            label: `${it.subtype}${it.model ? ' ' + it.model : ''} 초과사용${tag}`,
             bw: exBw,
             co: exCo,
+            month_bw: periodBw,
+            month_co: periodCo,
             bw_rate: a.bw_rate || 0,
             co_rate: a.co_rate || 0,
+            counter_bw_prev: prev.bw || 0,
+            counter_color_prev: prev.color || 0,
             counter_bw: cnt.bw || 0,
             counter_color: cnt.color || 0,
-            bw_free: a.bw_free || 0,
-            co_free: a.co_free || 0,
+            bw_free: freeBw,
+            co_free: freeCo,
             subtotal: sub,
+            billing_months: months,
           });
         }
       }
@@ -189,52 +289,44 @@
       usage_total,
       total: fixed_total + usage_total,
       items: [...fixedItems, ...usageItems],
+      combined,
+      billing_months: months,
+      period_label: periodLabel(ym, months),
     };
   }
 
   // ── 상단 stat-card ──────────────────────────────────────────
+  // 추가요금이 발생한 거래처에 한해 청구서를 발행 → 통계도 그 기준
   function renderStats() {
     const wrap = $('#rb-stats');
     if (!wrap) return;
 
-    let issued = 0, paidSum = 0, billedSum = 0, unpaidSum = 0;
-    const billedCustIds = new Set();
+    // 이번달: usage_total > 0 인 청구서만 카운트
+    let issued = 0, billedSum = 0;
     for (const b of state.billings.values()) {
+      if ((b.usage_total || 0) <= 0) continue;
       issued += 1;
       billedSum += b.total || 0;
-      billedCustIds.add(b.customer_id);
-      if (b.status === 'paid') paidSum += b.total || 0;
-      else if (b.status !== 'void') unpaidSum += b.total || 0;
     }
-    const totalCust = state.customers.length;
-    const notIssued = totalCust - billedCustIds.size;
-    const avg = issued > 0 ? Math.round(billedSum / issued) : 0;
+    const prevSum = state.prevBillingsTotal || 0;
+    const prevCount = state.prevBillingsCount || 0;
+    const prevYm = prevMonth(state.ym);
 
     wrap.innerHTML = `
       <div class="stat-card">
-        <div class="stat-label">발행 청구서</div>
-        <div class="stat-value primary">${issued}<span class="unit">건</span></div>
-        <div class="stat-sub muted">/ 총 ${totalCust}곳</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">미발행 거래처</div>
-        <div class="stat-value ${notIssued > 0 ? 'warn' : ''}">${notIssued}<span class="unit">곳</span></div>
-        <div class="stat-sub muted">일괄 생성 대상</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">합계 청구액</div>
-        <div class="stat-value">₩${fmtKRW(billedSum)}</div>
+        <div class="stat-label">추가요금 발행업체</div>
+        <div class="stat-value primary">${issued}<span class="unit">곳</span></div>
         <div class="stat-sub muted">${state.ym}</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">미입금액</div>
-        <div class="stat-value warn">₩${fmtKRW(unpaidSum)}</div>
-        <div class="stat-sub muted">draft + sent</div>
+        <div class="stat-label">지난달 발행총액</div>
+        <div class="stat-value">₩${fmtKRW(prevSum)}</div>
+        <div class="stat-sub muted">${prevYm} · ${prevCount}곳</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">평균 청구</div>
-        <div class="stat-value">₩${fmtKRW(avg)}</div>
-        <div class="stat-sub muted">건당</div>
+        <div class="stat-label">이번달 발행총액</div>
+        <div class="stat-value primary">₩${fmtKRW(billedSum)}</div>
+        <div class="stat-sub muted">${state.ym} · ${issued}곳</div>
       </div>
     `;
   }
@@ -271,7 +363,11 @@
         // 미리계산 (실시간으로 보이도록)
         const calc = computeBilling(c.id);
         total = calc.total;
-        statusBadge = `<span class="badge" style="background:#fef3c7;color:#b45309;">미발행</span>`;
+        if ((calc.usage_total || 0) > 0) {
+          statusBadge = `<span class="badge" style="background:#fef3c7;color:#b45309;">미발행</span>`;
+        } else {
+          statusBadge = `<span class="badge" style="background:#f1f5f9;color:#64748b;">추가요금없음</span>`;
+        }
       }
       const sel = state.selectedCustomerId === c.id ? ' selected' : '';
       return `
@@ -345,6 +441,7 @@
         </div>
         <div class="rb-detail-actions no-print">
           ${renderActionButtons(billing)}
+          <button class="btn ghost" id="rb-excel">📊 엑셀</button>
           <button class="btn ghost" id="rb-print">🖨 인쇄/PDF</button>
         </div>
       </div>
@@ -376,6 +473,9 @@
     // 이벤트 바인딩
     const printBtn = $('#rb-print');
     if (printBtn) printBtn.addEventListener('click', () => window.print());
+
+    const excelBtn = $('#rb-excel');
+    if (excelBtn) excelBtn.addEventListener('click', () => downloadExcel(cid));
 
     const saveBtn = $('#rb-save');
     if (saveBtn) saveBtn.addEventListener('click', () => saveOne(cid));
@@ -441,23 +541,27 @@
       <table class="rb-table">
         <thead>
           <tr>
-            <th style="width:34%;">품목</th>
-            <th class="num">흑백(무료/사용/초과)</th>
-            <th class="num">컬러(무료/사용/초과)</th>
+            <th style="width:30%;">품목</th>
+            <th class="num">흑백(전월/당월/월카운터/기본/추가)</th>
+            <th class="num">컬러(전월/당월/월카운터/기본/추가)</th>
             <th class="num">단가</th>
             <th class="num">소계</th>
           </tr>
         </thead>
         <tbody>
-          ${rows.map((r) => `
-            <tr>
-              <td>${escapeHtml(r.label || r.subtype || '')}</td>
-              <td class="num">${fmtKRW(r.bw_free)} / ${fmtKRW(r.counter_bw)} / <b>${fmtKRW(r.bw)}</b></td>
-              <td class="num">${fmtKRW(r.co_free)} / ${fmtKRW(r.counter_color)} / <b>${fmtKRW(r.co)}</b></td>
-              <td class="num">흑 ₩${fmtKRW(r.bw_rate)}<br>컬 ₩${fmtKRW(r.co_rate)}</td>
-              <td class="num">₩${fmtKRW(r.subtotal || 0)}</td>
-            </tr>
-          `).join('')}
+          ${rows.map((r) => {
+            const bwMonth = r.month_bw ?? Math.max(0, (r.counter_bw || 0) - (r.counter_bw_prev || 0));
+            const coMonth = r.month_co ?? Math.max(0, (r.counter_color || 0) - (r.counter_color_prev || 0));
+            return `
+              <tr>
+                <td>${escapeHtml(r.label || r.subtype || '')}</td>
+                <td class="num">${fmtKRW(r.counter_bw_prev)} / ${fmtKRW(r.counter_bw)} / ${fmtKRW(bwMonth)} / ${fmtKRW(r.bw_free)} / <b>${fmtKRW(r.bw)}</b></td>
+                <td class="num">${fmtKRW(r.counter_color_prev)} / ${fmtKRW(r.counter_color)} / ${fmtKRW(coMonth)} / ${fmtKRW(r.co_free)} / <b>${fmtKRW(r.co)}</b></td>
+                <td class="num">흑 ₩${fmtKRW(r.bw_rate)}<br>컬 ₩${fmtKRW(r.co_rate)}</td>
+                <td class="num">₩${fmtKRW(r.subtotal || 0)}</td>
+              </tr>
+            `;
+          }).join('')}
         </tbody>
       </table>
     `;
@@ -540,8 +644,8 @@
 
     for (const c of state.customers) {
       const calc = computeBilling(c.id);
-      // 청구할 게 없는 거래처는 스킵
-      if (calc.total <= 0 && calc.items.length === 0) continue;
+      // 추가요금(usage)이 있는 거래처만 청구서 발행
+      if ((calc.usage_total || 0) <= 0) continue;
       candidate += 1;
 
       const existing = state.billings.get(c.id);
@@ -589,6 +693,156 @@
       toast('일괄 생성 실패: ' + (e.message || e), 'error');
       setStatusText('일괄 생성 실패');
     }
+  }
+
+  // ── 엑셀 다운로드 ───────────────────────────────────────────
+  // 거래처 1곳 × 현재 청구월 → 1 sheet xlsx (엑셀 양식 매칭)
+  async function downloadExcel(customerId) {
+    try {
+      if (typeof XLSX === 'undefined') {
+        toast('엑셀 라이브러리(XLSX) 로드 실패', 'error');
+        return;
+      }
+      const c = state.customers.find((x) => x.id === customerId);
+      if (!c) { toast('거래처를 찾을 수 없습니다', 'error'); return; }
+
+      const ym = state.ym;
+      const billing = state.billings.get(customerId);
+      const view = billing ? {
+        fixed_total: billing.fixed_total || 0,
+        usage_total: billing.usage_total || 0,
+        total: billing.total || 0,
+        items: Array.isArray(billing.items) ? billing.items : [],
+      } : computeBilling(customerId);
+
+      // 전월 카운터: state.prevCounters 우선, 항목에 저장된 값 보조
+      const prevCnt = state.prevCounters;
+
+      // ─ 시트 생성 (aoa) ─
+      const aoa = [];
+      const blank = () => aoa.push([]);
+
+      // 헤더
+      aoa.push([`${c.company}  ${ym} 청구서`]);
+      aoa.push([`사업자번호: ${c.biz_no || ''}   주소: ${c.address || ''}`]);
+      blank();
+
+      // ── 1) 고정 임대료 ──
+      const fixedRows = view.items.filter((x) => x.kind === 'fixed');
+      aoa.push([`고정 임대료 (${fixedRows.length}건)`]);
+      aoa.push(['품목', '수량', '단가', '금액']);
+      for (const r of fixedRows) {
+        aoa.push([r.label || `${r.category}/${r.subtype}`, r.qty || 1, r.unit_price || 0, r.subtotal || 0]);
+      }
+      aoa.push(['소계', '', '', view.fixed_total]);
+      blank();
+
+      // ── 2) 사용량 초과 과금 (엑셀 양식 그대로) ──
+      const usageRows = view.items.filter((x) => x.kind === 'usage');
+      aoa.push([`사용량 초과 과금 (${usageRows.length}건)`]);
+      // 헤더 2줄
+      aoa.push([
+        '기기', '날짜',
+        '흑백', '', '', '', '', '', '',
+        '컬러', '', '', '', '', '', ''
+      ]);
+      aoa.push([
+        '', '',
+        '전월COUNT', '당월COUNT', '기본매수', '월카운터', '추가카운터', '추가사용단가', '추가사용료',
+        '전월COUNT', '당월COUNT', '기본매수', '월카운터', '추가카운터', '추가사용단가', '추가사용료'
+      ]);
+
+      let bwExtraSum = 0, coExtraSum = 0;
+      for (const r of usageRows) {
+        // 항목에 저장된 prev 가 있으면 우선, 없으면 state.prevCounters
+        const fromState = prevCnt.get(r.item_id) || { bw: 0, color: 0 };
+        const prevBw = (r.counter_bw_prev != null) ? r.counter_bw_prev : (fromState.bw || 0);
+        const prevCo = (r.counter_color_prev != null) ? r.counter_color_prev : (fromState.color || 0);
+        const bwCur = r.counter_bw || 0;
+        const coCur = r.counter_color || 0;
+        const bwMonth = (r.month_bw != null) ? r.month_bw : Math.max(0, bwCur - prevBw);
+        const coMonth = (r.month_co != null) ? r.month_co : Math.max(0, coCur - prevCo);
+        const bwExtra = bwMonth - (r.bw_free || 0);
+        const coExtra = coMonth - (r.co_free || 0);
+        const bwFee = bwExtra > 0 ? bwExtra * (r.bw_rate || 0) : 0;
+        const coFee = coExtra > 0 ? coExtra * (r.co_rate || 0) : 0;
+        bwExtraSum += bwFee;
+        coExtraSum += coFee;
+        aoa.push([
+          r.label || r.subtype || '',
+          ym,
+          prevBw, bwCur, r.bw_free || 0, bwMonth, bwExtra, r.bw_rate || 0, bwFee,
+          prevCo, coCur, r.co_free || 0, coMonth, coExtra, r.co_rate || 0, coFee
+        ]);
+      }
+      if (!usageRows.length) {
+        aoa.push(['(초과 사용 없음)']);
+      }
+      blank();
+
+      // ── 3) 합계 ──
+      aoa.push(['', '', '', '', '', '', '', '흑백추가', bwExtraSum]);
+      aoa.push(['', '', '', '', '', '', '', '칼라추가', coExtraSum]);
+      aoa.push(['', '', '', '', '', '', '', '고정임대료', view.fixed_total]);
+      aoa.push(['', '', '', '', '', '', '', '총 청구액', view.total, '', '', '', '부가세별도']);
+
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = [
+        { wch: 22 }, { wch: 10 },
+        { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 },
+        { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `${ym} 청구`);
+
+      const safeName = String(c.company || 'customer').replace(/[\\\/:*?"<>|]/g, '_');
+      const filename = `청구서_${safeName}_${ym}.xlsx`;
+      XLSX.writeFile(wb, filename);
+      toast('엑셀 다운로드 완료', 'ok');
+    } catch (e) {
+      console.error('[billing] excel error', e);
+      toast('엑셀 생성 실패: ' + (e.message || e), 'error');
+    }
+  }
+
+  function prevMonth(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  // ym 부터 count 개월(이번달 포함)을 ['YYYY-MM', ...] 로 반환 — 가장 최근부터 과거 순
+  function ymRange(ym, count) {
+    const [y, m] = ym.split('-').map(Number);
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const d = new Date(y, m - 1 - i, 1);
+      out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+    return out;
+  }
+  // ym - n 개월 (n=1 이면 직전월)
+  function ymMinus(ym, n) {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 - n, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+  // 청구 주기 라벨
+  function periodLabel(ym, months) {
+    if (months <= 1) return ym;
+    const startYm = ymMinus(ym, months - 1);
+    const [y, m] = ym.split('-').map(Number);
+    if (months === 3) {
+      const q = Math.ceil(m / 3);
+      return `${y}년 ${q}분기 (${startYm}~${ym})`;
+    }
+    if (months === 6) {
+      return `${y}년 ${m <= 6 ? '상반기' : '하반기'} (${startYm}~${ym})`;
+    }
+    if (months === 12) {
+      return `${y}년 (${startYm}~${ym})`;
+    }
+    return `${months}개월 (${startYm}~${ym})`;
   }
 
   // ── 통합 렌더 ───────────────────────────────────────────────
