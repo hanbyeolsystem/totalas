@@ -301,12 +301,12 @@
     const wrap = $('#rb-stats');
     if (!wrap) return;
 
-    // 이번달: usage_total > 0 인 청구서만 카운트
+    // 이번달: usage_total > 0 인 청구서만 카운트 (추가요금 합계만 집계)
     let issued = 0, billedSum = 0;
     for (const b of state.billings.values()) {
       if ((b.usage_total || 0) <= 0) continue;
       issued += 1;
-      billedSum += b.total || 0;
+      billedSum += b.usage_total || 0;
     }
     const prevSum = state.prevBillingsTotal || 0;
     const prevCount = state.prevBillingsCount || 0;
