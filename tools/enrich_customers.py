@@ -99,7 +99,7 @@ def sql_str(s):
 
 def main():
     rows = parse_pdf()
-    # 중복 biz_no 제거 (1행만 유지)
+    # biz_no 중복 제거
     seen = set()
     uniq = []
     for r in rows:
@@ -113,55 +113,52 @@ def main():
     lines = [
         '-- ============================================================',
         '-- 14_enrich_customers.sql  (auto from rental-customers/customers_list.pdf)',
-        '-- 한별 거래처 장부 1500여건을 rental_customers 에 UPSERT.',
-        '-- 정책: biz_no 기준 충돌 시 NULL 인 필드만 COALESCE 로 채움.',
-        '--      기존 데이터는 절대 덮어쓰지 않음.',
+        '-- 기존 rental_customers 에 PDF 마스터의 정보를 보강.',
+        '-- 정책: 회사명 정규화 매칭 → 매칭된 건만 NULL 필드 COALESCE 보강.',
+        '--      신규 INSERT 없음. 기존 데이터는 절대 덮어쓰지 않음.',
         '-- ============================================================',
         '',
-        '-- 1) biz_no UNIQUE 제약 (이미 있으면 무시)',
-        'DO $$ BEGIN',
-        "  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='rental_customers_biz_no_uniq') THEN",
-        '    -- 기존 중복 biz_no 가 있으면 가장 오래된 1건만 남기고 archive',
-        "    UPDATE rental_customers AS rc SET active=false,",
-        "      archived_at=now(), archived_reason='중복 사업자번호 통합'",
-        '      WHERE id IN (',
-        '        SELECT id FROM (',
-        '          SELECT id, biz_no, ROW_NUMBER() OVER (PARTITION BY biz_no ORDER BY created_at) rn',
-        '          FROM rental_customers WHERE biz_no IS NOT NULL',
-        '        ) t WHERE rn > 1',
-        '      );',
-        '    ALTER TABLE rental_customers',
-        '      ADD CONSTRAINT rental_customers_biz_no_uniq UNIQUE (biz_no);',
-        '  END IF;',
-        'END $$;',
+        '-- 1) 임시 테이블에 PDF 데이터 적재',
+        'CREATE TEMP TABLE IF NOT EXISTS _pdf_customers (',
+        '  norm_company TEXT,',
+        '  ceo          TEXT,',
+        '  biz_no       TEXT,',
+        '  mobile       TEXT,',
+        '  phone        TEXT',
+        ') ON COMMIT DROP;',
         '',
-        '-- 2) 마스터 거래처 INSERT (biz_no 충돌 시 COALESCE 보강)',
-        'INSERT INTO rental_customers (id, company, contact_name, biz_no, mobile, phone, active) VALUES',
+        'INSERT INTO _pdf_customers (norm_company, ceo, biz_no, mobile, phone) VALUES',
     ]
     val_rows = []
-    for idx, r in enumerate(rows):
-        if not r.get('biz_no'): continue
-        cid_seed = f"c_pdf_{idx+1:05d}"
+    for r in rows:
+        if not r.get('company'): continue
+        norm = norm_company(r['company'])
         val_rows.append(
-            f"({sql_str(cid_seed)}, {sql_str(r.get('company'))}, "
-            f"{sql_str(r.get('ceo'))}, {sql_str(r['biz_no'])}, "
-            f"{sql_str(r.get('mobile'))}, {sql_str(r.get('phone1'))}, TRUE)"
+            f"({sql_str(norm)}, {sql_str(r.get('ceo'))}, "
+            f"{sql_str(r.get('biz_no'))}, {sql_str(r.get('mobile'))}, "
+            f"{sql_str(r.get('phone1'))})"
         )
     lines.append(',\n'.join(val_rows))
-    lines.append('ON CONFLICT (biz_no) DO UPDATE SET')
-    lines.append('  company      = COALESCE(rental_customers.company,      EXCLUDED.company),')
-    lines.append('  contact_name = COALESCE(rental_customers.contact_name, EXCLUDED.contact_name),')
-    lines.append('  mobile       = COALESCE(rental_customers.mobile,       EXCLUDED.mobile),')
-    lines.append('  phone        = COALESCE(rental_customers.phone,        EXCLUDED.phone)')
     lines.append(';')
     lines.append('')
+    lines.append("-- 2) rental_customers 의 회사명을 같은 방식으로 정규화하여 매칭")
+    lines.append("--    매칭된 행만 NULL 필드를 COALESCE 로 채움")
+    lines.append('UPDATE rental_customers AS rc SET')
+    lines.append('  contact_name = COALESCE(rc.contact_name, p.ceo),')
+    lines.append('  biz_no       = COALESCE(rc.biz_no,       p.biz_no),')
+    lines.append('  mobile       = COALESCE(rc.mobile,       p.mobile),')
+    lines.append('  phone        = COALESCE(rc.phone,        p.phone)')
+    lines.append('FROM _pdf_customers AS p')
+    lines.append("WHERE replace(replace(replace(lower(rc.company),' ',''),'㈜','(주)'),'㈐','(사)') = p.norm_company;")
+    lines.append('')
     lines.append('-- 확인')
-    lines.append("SELECT COUNT(*) AS total,")
-    lines.append("       COUNT(contact_name) AS with_ceo,")
-    lines.append("       COUNT(biz_no) AS with_biz,")
-    lines.append("       COUNT(mobile) AS with_mobile,")
-    lines.append("       COUNT(phone) AS with_phone")
-    lines.append("  FROM rental_customers WHERE active=TRUE;")
+    lines.append('SELECT')
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE active=TRUE)   AS total_active,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE contact_name IS NOT NULL AND active) AS with_ceo,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE biz_no IS NOT NULL AND active)       AS with_biz,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE mobile IS NOT NULL AND active)       AS with_mobile,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE phone IS NOT NULL AND active)        AS with_phone")
+    lines.append(";")
     OUT.write_text('\n'.join(lines), encoding='utf-8')
     print(f"wrote {OUT.name}  ({len(rows)} rows)")
 
