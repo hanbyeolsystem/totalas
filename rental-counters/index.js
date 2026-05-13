@@ -56,6 +56,8 @@ async function init() {
   document.getElementById('f-only-missing').addEventListener('change', e => { state.onlyMissing = e.target.checked; render(); });
   document.getElementById('btn-refresh').addEventListener('click', reload);
 
+  initExcelImport();
+
   await reload();
 }
 
@@ -65,6 +67,8 @@ async function reload() {
     await Promise.all([loadCustomers(), loadItems(), loadCounters(), loadSupplies()]);
     fillCustomerFilter();
     render();
+    updateExcelTargetYm();
+    rematchExcelRows();
   } catch (err) {
     console.error(err);
     toast('로드 실패: ' + (err.message || err), true);
@@ -340,8 +344,8 @@ function renderRow(r) {
   return `
     <tr data-row="${escapeAttr(rowId)}">
       <td>
-        <div style="font-weight:600;">${escapeHtml(it.brand || '')} ${escapeHtml(it.model || rowId)}</div>
-        <div class="muted-small">${escapeHtml(it.customer_name)}</div>
+        <div style="font-weight:600;">${escapeHtml(it.customer_name)}</div>
+        <div class="muted-small">${escapeHtml(it.brand || '')} ${escapeHtml(it.model || rowId)}</div>
       </td>
       <td style="text-align:center;">${meterTag} <span class="muted-small">${escapeHtml(it.category || '')}${subtag ? ' ' + subtag : ''}</span></td>
       ${meterCells}
@@ -427,6 +431,299 @@ function escapeHtml(s) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));
 }
 function escapeAttr(s) { return escapeHtml(s); }
+
+// ===========================================================
+// 엑셀 일괄 입력
+// ===========================================================
+const excelState = {
+  rows: [],   // [{ idx, raw, company, model, bw, color, customerId, itemId, status, note }]
+};
+
+const HEADER_ALIASES = {
+  company: ['업체명', '거래처', '거래처명', '회사', '회사명', '고객사', '고객명', 'company', 'customer'],
+  model:   ['모델', '모델명', '기종', 'model'],
+  bw:      ['흑백', '흑백카운터', '흑백카운트', 'bw', 'mono', '모노'],
+  color:   ['컬러', '컬러카운터', '컬러카운트', 'color', 'col'],
+};
+
+let _excelInited = false;
+function initExcelImport() {
+  if (_excelInited) return;
+  _excelInited = true;
+  const toggle = document.getElementById('btn-excel-toggle');
+  const body   = document.getElementById('excel-body');
+  const drop   = document.getElementById('excel-drop');
+  const file   = document.getElementById('excel-file');
+  const clear  = document.getElementById('btn-excel-clear');
+  const save   = document.getElementById('btn-excel-save');
+
+  toggle.addEventListener('click', () => {
+    const open = body.style.display === 'none';
+    body.style.display = open ? '' : 'none';
+    toggle.textContent = open ? '닫기 ▴' : '열기 ▾';
+  });
+
+  drop.addEventListener('dragover',  e => { e.preventDefault(); drop.classList.add('drag-over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('drag-over');
+    const f = e.dataTransfer?.files?.[0];
+    if (f) handleExcelFile(f);
+  });
+  file.addEventListener('change', e => {
+    const f = e.target.files?.[0];
+    if (f) handleExcelFile(f);
+  });
+
+  clear.addEventListener('click', () => {
+    excelState.rows = [];
+    file.value = '';
+    document.getElementById('excel-preview').classList.add('hidden');
+    document.getElementById('excel-preview-body').innerHTML = '';
+    save.disabled = true;
+  });
+
+  save.addEventListener('click', saveExcelBatch);
+
+  updateExcelTargetYm();
+}
+
+function updateExcelTargetYm() {
+  const el = document.getElementById('excel-target-ym');
+  if (el) el.textContent = state.ym;
+}
+
+async function handleExcelFile(file) {
+  if (typeof XLSX === 'undefined') {
+    toast('엑셀 라이브러리 로드 실패', true);
+    return;
+  }
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const json = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+    if (!json.length) {
+      toast('빈 파일입니다', true);
+      return;
+    }
+    const headerMap = detectHeaders(Object.keys(json[0]));
+    if (!headerMap.company) {
+      toast('업체명 열을 찾을 수 없습니다', true);
+      return;
+    }
+    if (!headerMap.bw && !headerMap.color) {
+      toast('흑백/컬러 카운터 열을 찾을 수 없습니다', true);
+      return;
+    }
+    excelState.rows = json.map((r, i) => ({
+      idx: i + 1,
+      raw: r,
+      company: String(r[headerMap.company] || '').trim(),
+      model:   headerMap.model ? String(r[headerMap.model] || '').trim() : '',
+      bw:      headerMap.bw ? toNum(r[headerMap.bw]) : null,
+      color:   headerMap.color ? toNum(r[headerMap.color]) : null,
+      customerId: null,
+      itemId: null,
+      status: 'pending',
+      note: '',
+    })).filter(r => r.company);
+
+    rematchExcelRows();
+    document.getElementById('excel-preview').classList.remove('hidden');
+    toast(`${excelState.rows.length}행 로드됨`);
+  } catch (err) {
+    console.error(err);
+    toast('파일 읽기 실패: ' + (err.message || err), true);
+  }
+}
+
+function detectHeaders(keys) {
+  const out = {};
+  for (const key of keys) {
+    const norm = normalize(key);
+    for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+      if (out[field]) continue;
+      if (aliases.some(a => normalize(a) === norm)) { out[field] = key; break; }
+    }
+  }
+  return out;
+}
+
+function normalize(s) {
+  return String(s || '').toLowerCase().replace(/\s+/g, '').replace(/[()\[\]\-_./]/g, '');
+}
+
+function rematchExcelRows() {
+  if (!excelState.rows.length) return;
+  for (const row of excelState.rows) {
+    matchRow(row);
+  }
+  renderExcelPreview();
+}
+
+function matchRow(row) {
+  row.note = '';
+  // 1) 거래처 매칭
+  const normCompany = normalize(row.company);
+  const cust = state.customers.find(c => normalize(c.company) === normCompany)
+            || state.customers.find(c => normalize(c.company).includes(normCompany) || normCompany.includes(normalize(c.company)));
+
+  if (!cust) {
+    row.customerId = null;
+    row.itemId = null;
+    row.status = 'fail';
+    row.note = '거래처 없음';
+    return;
+  }
+  row.customerId = cust.id;
+
+  // 2) 자산 매칭
+  const candidates = state.items.filter(it => it.customer_id === cust.id);
+  if (!candidates.length) {
+    row.itemId = null;
+    row.status = 'warn';
+    row.note = '배정 자산 없음';
+    return;
+  }
+
+  let picked = null;
+  if (row.model) {
+    const nm = normalize(row.model);
+    picked = candidates.find(it => normalize(it.model) === nm)
+          || candidates.find(it => normalize(it.model).includes(nm) || nm.includes(normalize(it.model)));
+  }
+  if (!picked && candidates.length === 1) picked = candidates[0];
+
+  if (picked) {
+    row.itemId = picked.id;
+    row.status = 'ok';
+  } else {
+    row.itemId = null;
+    row.status = 'warn';
+    row.note = `자산 선택 필요 (${candidates.length}대)`;
+  }
+}
+
+function renderExcelPreview() {
+  const tbody = document.getElementById('excel-preview-body');
+  const rows = excelState.rows;
+  let ok = 0, warn = 0, fail = 0;
+
+  tbody.innerHTML = rows.map(r => {
+    if (r.status === 'ok')   ok++;
+    if (r.status === 'warn') warn++;
+    if (r.status === 'fail') fail++;
+
+    const cust = r.customerId ? state.customers.find(c => c.id === r.customerId) : null;
+    const cands = r.customerId ? state.items.filter(it => it.customer_id === r.customerId) : [];
+    const item  = r.itemId ? state.items.find(it => it.id === r.itemId) : null;
+
+    const prev = r.itemId ? state.prevMap[r.itemId] : null;
+    const bwPrev = prev?.bw ?? null;
+    const coPrev = prev?.color ?? null;
+    const bwInc  = (r.bw != null && bwPrev != null) ? Math.max(0, r.bw - bwPrev) : null;
+    const coInc  = (r.color != null && coPrev != null) ? Math.max(0, r.color - coPrev) : null;
+
+    const itemSel = r.status === 'fail'
+      ? `<span class="muted-small">–</span>`
+      : `<select class="cell-edit excel-item-sel" data-idx="${r.idx}">
+           <option value="">— 선택 —</option>
+           ${cands.map(c => `<option value="${escapeAttr(c.id)}" ${c.id === r.itemId ? 'selected' : ''}>${escapeHtml((c.brand||'') + ' ' + (c.model||c.id))}</option>`).join('')}
+         </select>`;
+
+    const custCell = cust
+      ? `<span title="${escapeAttr(cust.id)}">${escapeHtml(cust.company)}</span>`
+      : `<span style="color:#dc2626;">매칭 실패</span>`;
+
+    const statusBadge =
+      r.status === 'ok'   ? `<span class="excel-badge ok">✔ 매칭</span>`
+    : r.status === 'warn' ? `<span class="excel-badge warn">⚠ ${escapeHtml(r.note || '확인필요')}</span>`
+                          : `<span class="excel-badge fail">✖ ${escapeHtml(r.note || '실패')}</span>`;
+
+    return `
+      <tr class="excel-row excel-row-${r.status}">
+        <td>${r.idx}</td>
+        <td>${escapeHtml(r.company)}${r.model ? `<div class="muted-small">${escapeHtml(r.model)}</div>` : ''}</td>
+        <td>${custCell}</td>
+        <td>${itemSel}</td>
+        <td class="num">${fmt(bwPrev)}</td>
+        <td class="num">${fmt(r.bw)}</td>
+        <td class="num" style="${bwInc != null && bwInc > 0 ? 'color:#16a34a;font-weight:600;' : ''}">${fmt(bwInc)}</td>
+        <td class="num">${fmt(coPrev)}</td>
+        <td class="num">${fmt(r.color)}</td>
+        <td class="num" style="${coInc != null && coInc > 0 ? 'color:#16a34a;font-weight:600;' : ''}">${fmt(coInc)}</td>
+        <td>${statusBadge}</td>
+      </tr>
+    `;
+  }).join('');
+
+  document.getElementById('excel-total').textContent = rows.length;
+  document.getElementById('excel-matched').textContent = ok;
+  document.getElementById('excel-warn').textContent = warn;
+  document.getElementById('excel-fail').textContent = fail;
+  document.getElementById('btn-excel-save').disabled = ok === 0;
+
+  // 수동 자산 선택 핸들러
+  tbody.querySelectorAll('select.excel-item-sel').forEach(sel => {
+    sel.addEventListener('change', e => {
+      const idx = Number(e.target.dataset.idx);
+      const row = excelState.rows.find(r => r.idx === idx);
+      if (!row) return;
+      row.itemId = e.target.value || null;
+      if (row.itemId) { row.status = 'ok'; row.note = ''; }
+      else            { row.status = 'warn'; row.note = '자산 선택 필요'; }
+      renderExcelPreview();
+    });
+  });
+}
+
+async function saveExcelBatch() {
+  const targets = excelState.rows.filter(r => r.status === 'ok' && r.itemId);
+  if (!targets.length) { toast('저장할 행이 없습니다', true); return; }
+
+  const btn = document.getElementById('btn-excel-save');
+  btn.disabled = true;
+  btn.textContent = '저장 중…';
+
+  try {
+    const now = new Date().toISOString();
+    const payloads = targets.map(r => {
+      const existing = state.curMap[r.itemId] || {};
+      return {
+        item_id: r.itemId,
+        ym: state.ym,
+        bw:    r.bw    != null ? r.bw    : (existing.bw    ?? null),
+        color: r.color != null ? r.color : (existing.color ?? null),
+        uptime_hours: existing.uptime_hours ?? null,
+        read_at: now,
+        source: 'excel',
+      };
+    });
+
+    const { error } = await supa.from('rental_counters')
+      .upsert(payloads, { onConflict: 'item_id,ym' });
+    if (error) throw error;
+
+    for (const p of payloads) state.curMap[p.item_id] = p;
+    toast(`${payloads.length}건 저장됨`);
+    render();
+    renderExcelPreview();
+  } catch (err) {
+    console.error(err);
+    toast('일괄 저장 실패: ' + (err.message || err), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 최종 저장';
+  }
+}
+
+function toNum(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(String(v).replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
 
 let toastTimer = null;
 function toast(msg, isError = false) {
