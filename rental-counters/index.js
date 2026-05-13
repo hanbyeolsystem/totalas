@@ -35,12 +35,15 @@ const state = {
   customers: [],
 };
 
-if (window.totalasAuth) {
+// auth.js 의 bootstrap() 이 완료되어 window.currentUser 가 채워질 때까지 대기
+if (window.currentUser) {
   init();
 } else {
   document.addEventListener('totalas:ready', init, { once: true });
-  // 안전망
-  setTimeout(() => { if (!state.items.length) init(); }, 2000);
+  // 안전망 — 인증이 끝났는데 이벤트를 놓친 경우 대비
+  setTimeout(() => {
+    if (!state.items.length && window.currentUser) init();
+  }, 4000);
 }
 
 async function init() {
