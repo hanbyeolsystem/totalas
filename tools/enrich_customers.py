@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 ROOT = Path(__file__).resolve().parents[1]
 PDF  = ROOT / 'rental-customers' / 'customers_list.pdf'
-OUT  = ROOT / 'tools' / 'sql' / '14_enrich_customers.sql'
+OUT  = ROOT / 'tools' / 'sql' / '15_enrich_customers_fuzzy.sql'
 PEEK = ROOT / 'tools' / '_enrich_peek.json'
 
 # PDF 컬럼 라벨 (페이지 헤더에 보이는 항목들)
@@ -112,14 +112,16 @@ def main():
 
     lines = [
         '-- ============================================================',
-        '-- 14_enrich_customers.sql  (auto from rental-customers/customers_list.pdf)',
-        '-- 기존 rental_customers 에 PDF 마스터의 정보를 보강.',
-        '-- 정책: 회사명 정규화 매칭 → 매칭된 건만 NULL 필드 COALESCE 보강.',
-        '--      신규 INSERT 없음. 기존 데이터는 절대 덮어쓰지 않음.',
+        '-- 15_enrich_customers_fuzzy.sql  (auto from customers_list.pdf)',
+        '-- 3-pass 매칭으로 임대거래처 정보 보강.',
+        '-- 정책: 신규 INSERT 없음, NULL 필드만 COALESCE.',
+        '--      이미 입력된 값은 절대 덮어쓰지 않음.',
         '-- ============================================================',
         '',
-        '-- 1) 임시 테이블에 PDF 데이터 적재',
-        'CREATE TEMP TABLE IF NOT EXISTS _pdf_customers (',
+        'CREATE EXTENSION IF NOT EXISTS pg_trgm;',
+        '',
+        '-- 1) PDF 데이터 적재',
+        'CREATE TEMP TABLE _pdf_customers (',
         '  norm_company TEXT,',
         '  ceo          TEXT,',
         '  biz_no       TEXT,',
@@ -141,8 +143,19 @@ def main():
     lines.append(',\n'.join(val_rows))
     lines.append(';')
     lines.append('')
-    lines.append("-- 2) rental_customers 의 회사명을 같은 방식으로 정규화하여 매칭")
-    lines.append("--    매칭된 행만 NULL 필드를 COALESCE 로 채움")
+    lines.append('-- 2) 정규화 핵심 회사명 추출 함수 (접두·공백·기호 제거)')
+    lines.append("CREATE OR REPLACE FUNCTION _ext_core(name TEXT) RETURNS TEXT AS $f$")
+    lines.append('DECLARE s TEXT;')
+    lines.append('BEGIN')
+    lines.append('  IF name IS NULL THEN RETURN NULL; END IF;')
+    lines.append('  s := lower(name);')
+    lines.append("  s := regexp_replace(s, '주식회사|유한회사|\\(주\\)|㈜|\\(사\\)|㈐|\\(복\\)|\\(재\\)|\\(유\\)', '', 'g');")
+    lines.append("  s := regexp_replace(s, '[\\s·\\-\\.]+', '', 'g');")
+    lines.append('  RETURN s;')
+    lines.append('END;')
+    lines.append('$f$ LANGUAGE plpgsql IMMUTABLE;')
+    lines.append('')
+    lines.append('-- ==== PASS 1: norm_company 완전 일치 (14 와 동일) ====')
     lines.append('UPDATE rental_customers AS rc SET')
     lines.append('  contact_name = COALESCE(rc.contact_name, p.ceo),')
     lines.append('  biz_no       = COALESCE(rc.biz_no,       p.biz_no),')
@@ -151,14 +164,56 @@ def main():
     lines.append('FROM _pdf_customers AS p')
     lines.append("WHERE replace(replace(replace(lower(rc.company),' ',''),'㈜','(주)'),'㈐','(사)') = p.norm_company;")
     lines.append('')
+    lines.append('-- ==== PASS 2: 핵심 회사명 (접두 제거) 완전 일치 ====')
+    lines.append('WITH pdf_core AS (')
+    lines.append('  SELECT DISTINCT ON (_ext_core(norm_company))')
+    lines.append('    _ext_core(norm_company) AS core, ceo, biz_no, mobile, phone')
+    lines.append('  FROM _pdf_customers')
+    lines.append('  WHERE LENGTH(_ext_core(norm_company)) >= 3')
+    lines.append('  ORDER BY _ext_core(norm_company), ceo NULLS LAST')
+    lines.append(')')
+    lines.append('UPDATE rental_customers AS rc SET')
+    lines.append('  contact_name = COALESCE(rc.contact_name, p.ceo),')
+    lines.append('  biz_no       = COALESCE(rc.biz_no,       p.biz_no),')
+    lines.append('  mobile       = COALESCE(rc.mobile,       p.mobile),')
+    lines.append('  phone        = COALESCE(rc.phone,        p.phone)')
+    lines.append('FROM pdf_core AS p')
+    lines.append('WHERE _ext_core(rc.company) = p.core')
+    lines.append('  AND (rc.contact_name IS NULL OR rc.biz_no IS NULL OR rc.mobile IS NULL OR rc.phone IS NULL);')
+    lines.append('')
+    lines.append('-- ==== PASS 3: trigram 유사도 ≥ 0.6 (이미 절반 이상 보강된 행 skip) ====')
+    lines.append('WITH pdf_pool AS (')
+    lines.append('  SELECT _ext_core(norm_company) AS core, ceo, biz_no, mobile, phone')
+    lines.append('  FROM _pdf_customers')
+    lines.append('  WHERE LENGTH(_ext_core(norm_company)) >= 3')
+    lines.append('), candidates AS (')
+    lines.append('  SELECT DISTINCT ON (rc.id)')
+    lines.append('    rc.id, p.ceo, p.biz_no, p.mobile, p.phone,')
+    lines.append('    similarity(_ext_core(rc.company), p.core) AS sim')
+    lines.append('  FROM rental_customers rc')
+    lines.append('  JOIN pdf_pool p ON similarity(_ext_core(rc.company), p.core) >= 0.6')
+    lines.append('  WHERE rc.active = TRUE')
+    lines.append('    AND (rc.contact_name IS NULL AND rc.biz_no IS NULL)')
+    lines.append('  ORDER BY rc.id, sim DESC')
+    lines.append(')')
+    lines.append('UPDATE rental_customers AS rc SET')
+    lines.append('  contact_name = COALESCE(rc.contact_name, c.ceo),')
+    lines.append('  biz_no       = COALESCE(rc.biz_no,       c.biz_no),')
+    lines.append('  mobile       = COALESCE(rc.mobile,       c.mobile),')
+    lines.append('  phone        = COALESCE(rc.phone,        c.phone)')
+    lines.append('FROM candidates AS c')
+    lines.append('WHERE rc.id = c.id;')
+    lines.append('')
+    lines.append('DROP FUNCTION IF EXISTS _ext_core(TEXT);')
+    lines.append('')
     lines.append('-- 확인')
     lines.append('SELECT')
-    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE active=TRUE)   AS total_active,")
-    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE contact_name IS NOT NULL AND active) AS with_ceo,")
-    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE biz_no IS NOT NULL AND active)       AS with_biz,")
-    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE mobile IS NOT NULL AND active)       AS with_mobile,")
-    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE phone IS NOT NULL AND active)        AS with_phone")
-    lines.append(";")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE active=TRUE)                              AS total_active,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE contact_name IS NOT NULL AND active)      AS with_ceo,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE biz_no IS NOT NULL AND active)            AS with_biz,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE mobile IS NOT NULL AND active)            AS with_mobile,")
+    lines.append("  (SELECT COUNT(*) FROM rental_customers WHERE phone IS NOT NULL AND active)             AS with_phone")
+    lines.append(';')
     OUT.write_text('\n'.join(lines), encoding='utf-8')
     print(f"wrote {OUT.name}  ({len(rows)} rows)")
 
