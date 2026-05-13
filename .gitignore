@@ -14,6 +14,10 @@ tools/_*.json
 *.xls
 _temp_inspect/
 
+# 단, 가격표 페이지에 공개되는 단가표는 추적
+!prices/*.xlsx
+!prices/*.xls
+
 # 자격증명
 .env
 .env.*

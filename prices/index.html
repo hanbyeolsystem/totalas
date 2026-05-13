@@ -5,19 +5,241 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>가격표 — 한별시스템</title>
 <link rel="stylesheet" href="../styles.css">
+<style>
+  .prices-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 14px;
+    margin-top: 14px;
+    min-height: calc(100vh - 180px);
+  }
+  .prices-list {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    box-shadow: var(--shadow);
+    overflow: auto;
+    max-height: calc(100vh - 180px);
+  }
+  .prices-list .group-title {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    padding: 8px 8px 4px;
+  }
+  .prices-list button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 2px 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text);
+    transition: background .12s, border-color .12s;
+  }
+  .prices-list button:hover { background: var(--primary-soft); }
+  .prices-list button.active {
+    background: var(--primary-soft);
+    border-color: var(--primary);
+    color: var(--primary-hover);
+    font-weight: 600;
+  }
+  .prices-list button .meta {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+    font-weight: 400;
+  }
+  .prices-list button .ext {
+    float: right;
+    font-size: 10px;
+    background: var(--bg);
+    color: var(--muted);
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+  }
+
+  .prices-viewer {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .prices-viewer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: #fafbfc;
+  }
+  .prices-viewer-head h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .prices-viewer-head .meta {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .prices-viewer iframe {
+    width: 100%;
+    flex: 1;
+    border: 0;
+    min-height: 600px;
+    background: #fff;
+  }
+  .prices-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 40px;
+    text-align: center;
+  }
+
+  @media (max-width: 880px) {
+    .prices-layout {
+      grid-template-columns: 1fr;
+      min-height: auto;
+    }
+    .prices-list { max-height: none; }
+    .prices-viewer iframe { min-height: 70vh; }
+  }
+</style>
 </head>
 <body>
 <main class="container">
   <div class="page-head">
     <div>
       <h1>💵 가격표</h1>
-      <p class="muted" style="margin:2px 0 0 0;">제품별 임대 단가 관리.</p>
+      <p class="muted" style="margin:2px 0 0 0;">제조사 / 공급사별 단가표를 바로 열람합니다.</p>
     </div>
   </div>
-  <div class="card" style="padding:24px; text-align:center; margin-top:14px;">
-    <p style="font-size:14px; margin:0;">이 페이지는 비어 있습니다.</p>
-    <p class="muted" style="margin-top:6px;">새 내용으로 채울 예정입니다.</p>
+
+  <div class="prices-layout">
+    <aside class="prices-list" id="prices-list">
+      <div class="group-title">단가표 목록</div>
+    </aside>
+    <section class="prices-viewer">
+      <div class="prices-viewer-head">
+        <div>
+          <h2 id="current-name">가격표를 선택하세요</h2>
+          <div class="meta" id="current-meta">왼쪽에서 항목을 클릭하면 이 자리에 바로 열립니다.</div>
+        </div>
+        <a id="open-new" class="btn ghost small" target="_blank" rel="noopener" style="display:none;">↗ 새 창</a>
+      </div>
+      <div id="viewer-slot" class="prices-empty">단가표를 선택하면 여기에 표시됩니다.</div>
+    </section>
   </div>
 </main>
+
+<script>
+const FILES = [
+  { file: '1교세라부품 가격표_2026년1월.xlsx',
+    label: '교세라 부품 가격표', meta: '2026.01' },
+  { file: '2재생토너 단가표_위더스(202208).xlsx',
+    label: '위더스 재생토너 단가표', meta: '2022.08' },
+  { file: '3에스와이 토너이미지변동단가(202603).pdf',
+    label: '에스와이 토너/이미지 변동단가', meta: '2026.03' },
+  { file: '4케이지하이테크 교세라 단가표 KG2024 - 11월 카피어.xls',
+    label: '케이지하이테크 교세라 단가표', meta: 'KG2024 · 카피어 11월' },
+  { file: '★ 260406_시놀로지 공급 단가표 - (전 품목) 인상.xlsx',
+    label: '시놀로지 공급 단가표', meta: '2026.04.06 (전 품목 인상)' },
+];
+
+const listEl  = document.getElementById('prices-list');
+const slotEl  = document.getElementById('viewer-slot');
+const nameEl  = document.getElementById('current-name');
+const metaEl  = document.getElementById('current-meta');
+const openNew = document.getElementById('open-new');
+
+// 파일 절대 URL — Office Viewer 는 인터넷에서 접근 가능한 절대 URL 필요.
+function absoluteFileUrl(filename) {
+  const base = new URL('.', location.href);  // .../prices/
+  return new URL(filename, base).href;
+}
+
+function viewerUrl(filename) {
+  const abs = absoluteFileUrl(filename);
+  if (/\.pdf$/i.test(filename)) {
+    return abs;  // 브라우저 내장 PDF 뷰어
+  }
+  return 'https://view.officeapps.live.com/op/embed.aspx?src=' + encodeURIComponent(abs);
+}
+
+function ext(name) {
+  const m = name.match(/\.([^.]+)$/);
+  return m ? m[1].toUpperCase() : '';
+}
+
+function renderList() {
+  FILES.forEach((it, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.idx = i;
+    btn.innerHTML = `
+      <span class="ext">${ext(it.file)}</span>
+      ${it.label}
+      <span class="meta">${it.meta}</span>
+    `;
+    btn.addEventListener('click', () => select(i));
+    listEl.appendChild(btn);
+  });
+}
+
+function select(i) {
+  const it = FILES[i];
+  if (!it) return;
+
+  document.querySelectorAll('#prices-list button').forEach(b => {
+    b.classList.toggle('active', Number(b.dataset.idx) === i);
+  });
+
+  nameEl.textContent = it.label;
+  metaEl.textContent = `${it.meta} · ${it.file}`;
+
+  // 로컬 환경(file:// 또는 localhost)에서는 Office Online Viewer 가
+  // 외부 접근 불가능한 경로를 못 읽으므로 안내 표시.
+  const isLocal = location.protocol === 'file:'
+              || /^(localhost|127\.|192\.168\.)/.test(location.hostname);
+  const isPdf  = /\.pdf$/i.test(it.file);
+
+  if (isLocal && !isPdf) {
+    slotEl.outerHTML = `
+      <div id="viewer-slot" class="prices-empty">
+        로컬 환경에서는 Office 뷰어가 동작하지 않습니다.<br>
+        <a href="${absoluteFileUrl(it.file)}" target="_blank" style="color:var(--primary);text-decoration:underline;">
+          파일 직접 열기
+        </a>
+        — GitHub Pages 라이브에서는 정상 동작합니다.
+      </div>`;
+  } else {
+    slotEl.outerHTML = `<iframe id="viewer-slot" src="${viewerUrl(it.file)}" title="${it.label}"></iframe>`;
+  }
+
+  openNew.href = absoluteFileUrl(it.file);
+  openNew.style.display = '';
+}
+
+renderList();
+// 첫 항목 자동 선택
+if (FILES.length) select(0);
+</script>
 </body>
 </html>
