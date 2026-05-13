@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>가격표 — 한별시스템</title>
+<script>
+  // standalone URL 진입 시 → asms.html shell 안으로 redirect.
+  // shell 의 햄버거 / 사이드바 / 인증을 그대로 사용. ?standalone=1 붙이면 우회.
+  if (window === window.top && !new URLSearchParams(location.search).has('standalone')) {
+    location.replace('../asms.html#prices/index.html');
+  }
+</script>
 <link rel="stylesheet" href="../styles.css">
 <style>
   .prices-layout {
