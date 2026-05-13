@@ -1,0 +1,2 @@
+-- (deprecated, 분할됨)
+-- 실행 순서: 15a1_setup.sql → 15a2~5_chunk.sql → 15b_match.sql
