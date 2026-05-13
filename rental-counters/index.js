@@ -96,6 +96,7 @@ async function loadItems() {
                             rental_customers ( id, company ) )
     `)
     .eq('status', 'active')
+    .order('install_date', { ascending: false, nullsFirst: false })
     .order('id');
   if (error) throw error;
   state.items = (data || []).map(it => {
