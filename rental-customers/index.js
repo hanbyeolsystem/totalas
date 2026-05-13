@@ -891,32 +891,46 @@ function closeModal() {
 // CRUD: 자산 (rental_items + rental_assignments)
 // ─────────────────────────────────────────────────────────────
 
-// 카테고리 → 품목(subtype) 옵션
-const SUBTYPE_OPTIONS = {
-  'IT':   ['PC', '노트북', 'monitor', 'NAS'],
-  '출력': ['잉크젯', '레이저', '복합기'],
-  '위생': ['웰리스'],
+// 9개 품목 → { category, subtype } 매핑 (DB 청구 로직 호환)
+const ITEM_TO_CATSUB = {
+  '흑백복사기': { category: '출력', subtype: '흑백복합기', isPrint: true,  isNas: false },
+  '컬러복사기': { category: '출력', subtype: '컬러복합기', isPrint: true,  isNas: false },
+  '흑백레이저': { category: '출력', subtype: '흑백레이저', isPrint: true,  isNas: false },
+  '컬러레이저': { category: '출력', subtype: '컬러레이저', isPrint: true,  isNas: false },
+  '잉크젯':     { category: '출력', subtype: '잉크젯',     isPrint: true,  isNas: false },
+  '컴퓨터':     { category: 'IT',   subtype: '컴퓨터',     isPrint: false, isNas: false },
+  '모니터':     { category: 'IT',   subtype: '모니터',     isPrint: false, isNas: false },
+  '웰리스':     { category: '위생', subtype: '웰리스',     isPrint: false, isNas: false },
+  '나스':       { category: 'IT',   subtype: '나스',       isPrint: false, isNas: true  },
 };
-const PRINT_SUBTYPES = new Set(['잉크젯','레이저','복합기','inkjet','laser','mfp']);
 
-function fillSubtypeOptions(catSel, subSel, current) {
-  const cat = catSel.value;
-  const opts = SUBTYPE_OPTIONS[cat] || [];
-  subSel.innerHTML = opts.length
-    ? ['<option value="">선택</option>', ...opts.map(o => `<option value="${escapeAttr(o)}">${escapeHtml(o)}</option>`)].join('')
-    : '<option value="">먼저 카테고리 선택</option>';
-  if (current && opts.includes(current)) subSel.value = current;
+// 기존 자산(category, subtype, co_rate)을 9개 품목으로 역분류 (수정 폼 열 때)
+function classifyToItemType(it, asgn) {
+  const sub = (it && it.subtype || '').toLowerCase();
+  const cat = it && it.category || '';
+  const isColor = asgn ? ((asgn.co_rate || 0) > 0 || (asgn.co_free || 0) > 0) : false;
+  if (sub.includes('흑백복합기') || sub.includes('흑백복사기')) return '흑백복사기';
+  if (sub.includes('컬러복합기') || sub.includes('컬러복사기')) return '컬러복사기';
+  if (sub.includes('흑백레이저')) return '흑백레이저';
+  if (sub.includes('컬러레이저')) return '컬러레이저';
+  if (/복합기|mfp|복사/.test(sub)) return isColor ? '컬러복사기' : '흑백복사기';
+  if (/laser|레이저/.test(sub))   return isColor ? '컬러레이저' : '흑백레이저';
+  if (/inkjet|잉크젯/.test(sub))  return '잉크젯';
+  if (/pc|컴퓨터|데스크|노트북/.test(sub)) return '컴퓨터';
+  if (/monitor|모니터/.test(sub)) return '모니터';
+  if (cat === '위생' || /wellness|wellis|웰리스|제균|필터/.test(sub)) return '웰리스';
+  if (/nas|나스/.test(sub))       return '나스';
+  return '';
 }
 
 function applyAssetVisibility(form) {
-  const sub = form.subtype.value || '';
-  const isPrint = PRINT_SUBTYPES.has(sub);
-  const isNas = /nas/i.test(sub);
+  const itemType = form.item_type ? form.item_type.value : '';
+  const info = ITEM_TO_CATSUB[itemType] || { isPrint: false, isNas: false };
   form.querySelectorAll('[data-show]').forEach(row => {
     const tag = row.dataset.show;
     let show = false;
-    if (tag === 'print') show = isPrint;
-    else if (tag === 'nas') show = isNas;
+    if (tag === 'print') show = info.isPrint;
+    else if (tag === 'nas') show = info.isNas;
     row.classList.toggle('hidden', !show);
   });
 }
@@ -929,24 +943,18 @@ function openAssetForm(customer, existing) {
   body.appendChild(tpl.content.cloneNode(true));
 
   const f = body.querySelector('#asset-form');
-  const catSel = f.category;
-  const subSel = f.subtype;
+  const itemSel = f.item_type;
 
-  // 카테고리 변경 → 품목 옵션 갱신
-  catSel.addEventListener('change', () => {
-    fillSubtypeOptions(catSel, subSel, null);
-    applyAssetVisibility(f);
-  });
-  subSel.addEventListener('change', () => applyAssetVisibility(f));
+  // 품목 변경 → print/nas visibility 갱신
+  itemSel.addEventListener('change', () => applyAssetVisibility(f));
 
   if (existing) {
     body.querySelector('#asset-form-title').textContent =
       `자산 수정 — ${(existing.rental_items.model || existing.rental_items.subtype || '')}`;
     const it = existing.rental_items || {};
-    const initialCat = it.category || categoryOf(it.subtype);
-    catSel.value = SUBTYPE_OPTIONS[initialCat] ? initialCat : '';
-    fillSubtypeOptions(catSel, subSel, it.subtype || '');
-    if (it.subtype) subSel.value = it.subtype;
+    // 기존 자산을 9개 품목으로 역분류
+    const inferredType = classifyToItemType(it, existing);
+    if (inferredType) itemSel.value = inferredType;
     f.brand.value = it.brand || '';
     f.model.value = it.model || '';
     f.serial.value = it.serial || '';
@@ -976,11 +984,12 @@ function openAssetForm(customer, existing) {
     btn.textContent = '저장 중…';
 
     try {
-      const category = catSel.value;
-      const subtype = subSel.value;
+      const itemType = itemSel.value;
+      const mapping = ITEM_TO_CATSUB[itemType];
+      if (!mapping) throw new Error('품목을 선택하세요.');
+      const category = mapping.category;
+      const subtype  = mapping.subtype;
       const model = f.model.value.trim();
-      if (!category) throw new Error('카테고리를 선택하세요.');
-      if (!subtype) throw new Error('품목을 선택하세요.');
       if (!model) throw new Error('모델은 필수입니다.');
 
       const itemPayload = {

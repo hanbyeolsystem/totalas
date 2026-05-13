@@ -7,10 +7,37 @@
   'use strict';
 
   // ---------- 상수 ----------
-  const CATEGORIES = ['IT', '출력', '위생'];
+  // 9개 세분 품목 (UI 라벨 / 필터 기준)
+  const CATEGORIES = [
+    '흑백복사기', '컬러복사기', '흑백레이저', '컬러레이저', '잉크젯',
+    '컴퓨터', '모니터', '웰리스', '나스',
+  ];
   const REPLACE_THRESHOLD_MONTHS = 60; // 5년
   const WARN_THRESHOLD_MONTHS = 36;    // 3년
   const MAX_RENDER = 1000;
+
+  // ---------- 자산 분류 (rental_items.subtype + assignment.co_rate 조합) ----------
+  // 신규: subtype 자체가 '흑백복합기'/'컬러레이저' 등으로 박힐 수도, 또는
+  // 레거시 subtype('복합기'/'레이저') + co_rate>0 → 컬러로 추론
+  function classifyItem(it, asgn) {
+    const sub = (it && it.subtype || '').toLowerCase();
+    const cat = it && it.category || '';
+    const isColor = asgn ? ((asgn.co_rate || 0) > 0 || (asgn.co_free || 0) > 0) : false;
+    // 직접 박힌 신규 라벨
+    if (sub.includes('흑백복합기') || sub.includes('흑백복사기')) return '흑백복사기';
+    if (sub.includes('컬러복합기') || sub.includes('컬러복사기')) return '컬러복사기';
+    if (sub.includes('흑백레이저')) return '흑백레이저';
+    if (sub.includes('컬러레이저')) return '컬러레이저';
+    // 레거시 분류
+    if (/복합기|mfp|복사/.test(sub))  return isColor ? '컬러복사기' : '흑백복사기';
+    if (/laser|레이저/.test(sub))     return isColor ? '컬러레이저' : '흑백레이저';
+    if (/inkjet|잉크젯/.test(sub))    return '잉크젯';
+    if (/pc|컴퓨터|데스크|노트북/.test(sub)) return '컴퓨터';
+    if (/monitor|모니터/.test(sub))   return '모니터';
+    if (cat === '위생' || /wellness|wellis|웰리스|제균|필터/.test(sub)) return '웰리스';
+    if (/nas|나스/.test(sub))         return '나스';
+    return '기타';
+  }
 
   // ---------- 상태 ----------
   const state = {
@@ -158,7 +185,7 @@
       s.items.push(it);
       s.assignments.push(a);
       s.monthlyFee += Number(a.monthly_fee || 0);
-      const c = it.category || '기타';
+      const c = classifyItem(it, a);
       s.byCat[c] = (s.byCat[c] || 0) + 1;
       const ag = ageMonths(it);
       if (ag != null) s.maxAge = s.maxAge == null ? ag : Math.max(s.maxAge, ag);
@@ -206,15 +233,14 @@
   // ---------- 카테고리 빠른 분포 ----------
   function renderCatRow() {
     const row = $('#rs-cat-row');
-    // 라벨 이외 제거
     Array.from(row.querySelectorAll('.cat-pill')).forEach(p => p.remove());
 
+    const assignMap = buildItemAssignMap();
     const counts = {};
     for (const it of state.items) {
-      const c = it.category || '기타';
+      const c = classifyItem(it, assignMap.get(it.id));
       counts[c] = (counts[c] || 0) + 1;
     }
-    // 카테고리 순서: IT, 출력, 위생, 기타
     const order = [...CATEGORIES, ...Object.keys(counts).filter(c => !CATEGORIES.includes(c))];
     for (const c of order) {
       if (!counts[c]) continue;
@@ -223,7 +249,6 @@
       pill.className = 'cat-pill';
       pill.innerHTML = `<span>${escapeHtml(c)}</span><span class="cat-pill-count">${counts[c]}</span>`;
       pill.addEventListener('click', () => {
-        // 자산 탭으로 이동 + 카테고리 필터 적용
         state.filters.item.cat = c;
         switchTab('items');
         const sel = $('#if-cat');
@@ -360,7 +385,8 @@
     let rows = getItemRows();
 
     rows = rows.filter(({ it, customer, assignment }) => {
-      if (f.cat && it.category !== f.cat) return false;
+      const klass = classifyItem(it, assignment);
+      if (f.cat && klass !== f.cat) return false;
       if (f.sub && it.subtype !== f.sub) return false;
       if (f.status && (it.status || 'active') !== f.status) return false;
       const has = !!assignment;
@@ -368,18 +394,20 @@
       if (f.assign === 'idle' && has) return false;
       if (q) {
         const hay = [it.brand, it.model, it.serial, it.subtype, it.category,
-                     it.notes, customer && customer.company]
+                     klass, it.notes, customer && customer.company]
           .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
         if (!hay.includes(q)) return false;
       }
       return true;
     });
 
-    // 정렬: 카테고리 > 품목 > 모델
-    rows.sort((a, b) =>
-      String(a.it.category || '').localeCompare(String(b.it.category || ''), 'ko') ||
-      String(a.it.subtype || '').localeCompare(String(b.it.subtype || ''), 'ko') ||
-      String(a.it.model || '').localeCompare(String(b.it.model || ''), 'ko'));
+    // 정렬: 분류 품목 > 모델
+    rows.sort((a, b) => {
+      const ka = classifyItem(a.it, a.assignment);
+      const kb = classifyItem(b.it, b.assignment);
+      return String(ka).localeCompare(String(kb), 'ko') ||
+             String(a.it.model || '').localeCompare(String(b.it.model || ''), 'ko');
+    });
 
     $('#if-count').textContent = `${rows.length.toLocaleString()} 건`;
 
@@ -394,10 +422,11 @@
         : '<span class="muted-cell">미배정</span>';
       const fee = assignment && Number(assignment.monthly_fee) > 0
         ? fmtMoney(assignment.monthly_fee) : '<span class="muted-cell">–</span>';
+      const klass = classifyItem(it, assignment);
       return `
         <tr>
           <td>${idx + 1}</td>
-          <td>${escapeHtml(it.category || '–')}</td>
+          <td>${escapeHtml(klass)}</td>
           <td>${escapeHtml(it.subtype || '–')}</td>
           <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
           <td class="hide-mobile">${escapeHtml(it.serial || '–')}</td>
@@ -426,12 +455,13 @@
     const q = f.q.trim().toLowerCase();
 
     let rows = getItemRows();
-    rows = rows.filter(({ it, customer, ageM }) => {
-      if (f.cat && it.category !== f.cat) return false;
+    rows = rows.filter(({ it, customer, assignment, ageM }) => {
+      const klass = classifyItem(it, assignment);
+      if (f.cat && klass !== f.cat) return false;
       if (f.band && ageBand(ageM) !== f.band) return false;
       if (q) {
         const hay = [it.brand, it.model, it.serial, it.subtype, it.category,
-                     customer && customer.company]
+                     klass, customer && customer.company]
           .map(v => (v == null ? '' : String(v).toLowerCase())).join(' ');
         if (!hay.includes(q)) return false;
       }
@@ -452,16 +482,17 @@
       return;
     }
     const slice = rows.slice(0, MAX_RENDER);
-    const html = slice.map(({ it, customer, ageM }, idx) => {
+    const html = slice.map(({ it, customer, assignment, ageM }, idx) => {
       const cust = customer
         ? escapeHtml(customer.company || '–')
         : '<span class="muted-cell">미배정</span>';
       const replace = ageM != null && ageM >= REPLACE_THRESHOLD_MONTHS
         ? '<span class="replace-tag">교체</span>' : '';
+      const klass = classifyItem(it, assignment);
       return `
         <tr>
           <td>${idx + 1}</td>
-          <td>${escapeHtml(it.category || '–')}</td>
+          <td>${escapeHtml(klass)}</td>
           <td>${escapeHtml(it.subtype || '–')}</td>
           <td>${escapeHtml(it.brand || '–')} / ${escapeHtml(it.model || '–')}</td>
           <td class="hide-mobile">${escapeHtml(it.serial || '–')}</td>
@@ -555,23 +586,31 @@
   let _selectsBuilt = false;
   function populateSelectsOnce() {
     if (_selectsBuilt) return;
-    const cats = new Set();
     const subs = new Set();
     for (const it of state.items) {
-      if (it.category) cats.add(it.category);
       if (it.subtype) subs.add(it.subtype);
     }
-    const fillSel = (sel, values) => {
+    const fillSel = (sel, values, sort = true) => {
       if (!sel) return;
-      for (const v of Array.from(values).sort()) {
+      const arr = sort ? Array.from(values).sort() : Array.from(values);
+      for (const v of arr) {
         const opt = document.createElement('option');
         opt.value = v; opt.textContent = v;
         sel.appendChild(opt);
       }
     };
-    fillSel($('#if-cat'), cats);
+    // 카테고리는 9개 세분 품목으로 고정
+    fillSel($('#if-cat'), CATEGORIES, false);
     fillSel($('#if-sub'), subs);
-    fillSel($('#af-cat'), cats);
+    fillSel($('#af-cat'), CATEGORIES, false);
+
+    // cf-cat (거래처별 보유 카테고리) 도 9개 품목으로 교체
+    const cfCat = $('#cf-cat');
+    if (cfCat) {
+      // 기존 옵션 모두 제거 후 재구성
+      cfCat.innerHTML = '<option value="">보유 카테고리 (전체)</option>'
+        + CATEGORIES.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)} 보유</option>`).join('');
+    }
     _selectsBuilt = true;
   }
 

@@ -985,22 +985,20 @@
 <template id="tpl-asset-form">
   <h3 id="asset-form-title">자산 추가</h3>
   <form id="asset-form" autocomplete="off">
-    <div class="rc-form-row two">
-      <div class="rc-form-row" style="margin:0;">
-        <label>카테고리 *</label>
-        <select name="category" required>
-          <option value="">선택</option>
-          <option value="IT">IT</option>
-          <option value="출력">출력</option>
-          <option value="위생">위생</option>
-        </select>
-      </div>
-      <div class="rc-form-row" style="margin:0;">
-        <label>품목 *</label>
-        <select name="subtype" required>
-          <option value="">먼저 카테고리 선택</option>
-        </select>
-      </div>
+    <div class="rc-form-row">
+      <label>품목 *</label>
+      <select name="item_type" required>
+        <option value="">선택</option>
+        <option value="흑백복사기">흑백복사기</option>
+        <option value="컬러복사기">컬러복사기</option>
+        <option value="흑백레이저">흑백레이저</option>
+        <option value="컬러레이저">컬러레이저</option>
+        <option value="잉크젯">잉크젯</option>
+        <option value="컴퓨터">컴퓨터</option>
+        <option value="모니터">모니터</option>
+        <option value="웰리스">웰리스</option>
+        <option value="나스">나스</option>
+      </select>
     </div>
     <div class="rc-form-row two">
       <div class="rc-form-row" style="margin:0;">
@@ -1083,6 +1081,6 @@
   </form>
 </template>
 
-<script src="index.js?v=20260513l"></script>
+<script src="index.js?v=20260513m"></script>
 </body>
 </html>
