@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS prices_index (
   created_by  UUID REFERENCES auth.users(id)
 );
 
+-- 기존 테이블이 이미 있던 경우 누락 컬럼 보강 (멱등성 보장)
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS label      TEXT;
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS meta       TEXT;
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS file_path  TEXT;
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS ext        TEXT;
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE prices_index ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES auth.users(id);
+
 CREATE INDEX IF NOT EXISTS idx_prices_index_sort
   ON prices_index (sort_order, created_at);
 
