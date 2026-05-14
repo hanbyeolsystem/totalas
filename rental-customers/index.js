@@ -683,8 +683,8 @@ function renderDetail() {
     </div>
   `;
 
-  // 순서: 기본정보 → 보유자산 → AS 주기 → (hook 으로 계약서 카드 삽입) → Cross-sell 인사이트
-  detail.innerHTML = infoCard + assetCard + asCard + insightCard;
+  // 순서: 보유자산 → AS 주기 → 기본정보 → (hook 으로 계약서 카드 삽입) → Cross-sell 인사이트
+  detail.innerHTML = assetCard + asCard + infoCard + insightCard;
 
   document.getElementById('btn-edit').addEventListener('click', () => openForm(c));
   document.getElementById('btn-delete').addEventListener('click', () => deleteCustomer(c));
@@ -2673,14 +2673,14 @@ renderDetail = function () {
   const c = STATE.customers.find(x => x.id === STATE.selectedId);
   if (!c) return;
 
-  // 계약서 카드: 보유자산 카드 바로 위에 삽입
-  // (기본정보 → 계약서 → 보유자산 → AS주기 → Cross-sell 순)
+  // 계약서 카드: Cross-sell 카드 바로 앞에 삽입
+  // (보유자산 → AS주기 → 기본정보 → 계약서 → Cross-sell 순)
   const detail = document.getElementById('rc-detail');
   const ctCardHTML = renderContractCard(c);
-  const assetCard = Array.from(detail.querySelectorAll('.card'))
-    .find(el => /보유\s*자산/.test(el.textContent || ''));
-  if (assetCard) {
-    assetCard.insertAdjacentHTML('beforebegin', ctCardHTML);
+  const insightCard = Array.from(detail.querySelectorAll('.card'))
+    .find(el => /Cross-sell/i.test(el.textContent || ''));
+  if (insightCard) {
+    insightCard.insertAdjacentHTML('beforebegin', ctCardHTML);
   } else {
     detail.insertAdjacentHTML('beforeend', ctCardHTML);
   }
