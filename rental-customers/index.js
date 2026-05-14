@@ -658,33 +658,11 @@ function renderDetail() {
     </div>
   `;
 
-  // 4) AS 주기 표
-  const asRows = buildAsRows(c);
-  const asCard = `
-    <div class="card">
-      <h3>🛠 AS 주기 계획</h3>
-      ${asRows.length ? `
-        <table class="rc-as-table">
-          <thead>
-            <tr><th>품목</th><th>주기</th><th>점검 작업</th><th>다음 점검 (추정)</th></tr>
-          </thead>
-          <tbody>
-            ${asRows.map(r => `
-              <tr>
-                <td>${escapeHtml(r.subtype)} <span class="muted-small">×${r.count}</span></td>
-                <td>${r.months}개월</td>
-                <td>${escapeHtml(r.task)}</td>
-                <td class="${r.overdue ? '' : 'muted-small'}" ${r.overdue ? 'style="color:#dc2626;font-weight:600;"' : ''}>${escapeHtml(r.nextDate)} ${r.overdue ? '(지연)' : ''}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      ` : `<p class="muted" style="margin:0; font-size:12.5px;">자산이 없어 AS 주기를 표시할 수 없습니다.</p>`}
-    </div>
-  `;
+  // 4) 수리내역 표 (asCard 자리 — hook 에서 데이터 로드 후 채워짐)
+  const repairCard = renderRepairCard(c);
 
-  // 순서: 보유자산 → AS 주기 → 기본정보 → (hook 으로 계약서 카드 삽입) → Cross-sell 인사이트
-  detail.innerHTML = assetCard + asCard + infoCard + insightCard;
+  // 순서: 보유자산 → 수리내역 → 기본정보 → (hook 으로 계약서 카드 삽입) → Cross-sell 인사이트
+  detail.innerHTML = assetCard + repairCard + infoCard + insightCard;
 
   document.getElementById('btn-edit').addEventListener('click', () => openForm(c));
   document.getElementById('btn-delete').addEventListener('click', () => deleteCustomer(c));
@@ -2666,6 +2644,174 @@ async function deleteContract() {
   }
 }
 
+// ── 수리내역 (rental_repairs) ────────────────────────
+const REPAIR_STATE = {
+  byCustomer: {}, // { customer_id: [repairs...] }
+};
+const REPAIR_TYPES = ['출장', '부품교체', '토너'];
+
+async function loadRepairsFor(customerId) {
+  const supa = window.totalasAuth;
+  if (!supa) return [];
+  try {
+    const { data, error } = await supa
+      .from('rental_repairs')
+      .select('*')
+      .eq('customer_id', customerId)
+      .order('service_date', { ascending: false })
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    REPAIR_STATE.byCustomer[customerId] = data || [];
+    return data || [];
+  } catch (err) {
+    console.warn('수리내역 로드 실패:', err.message || err);
+    REPAIR_STATE.byCustomer[customerId] = [];
+    return [];
+  }
+}
+
+function renderRepairCard(customer) {
+  const list = REPAIR_STATE.byCustomer[customer.id];
+  const loaded = Array.isArray(list);
+  const rows = loaded ? list : [];
+  const sum = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const typeOptions = REPAIR_TYPES.map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('');
+
+  const dataRows = rows.length
+    ? rows.map(r => {
+        const amt = Number(r.amount) || 0;
+        const amtColor = amt < 0 ? 'color:#dc2626;' : (amt > 0 ? 'color:#0f172a;' : 'color:#94a3b8;');
+        return `
+          <tr data-rid="${escapeAttr(r.id)}">
+            <td class="muted-small">${escapeHtml((r.service_date || '').slice(0, 10))}</td>
+            <td>${escapeHtml(r.item_type || '-')}</td>
+            <td>${escapeHtml(r.work_desc || '-')}</td>
+            <td style="text-align:right; font-weight:600; ${amtColor}">${amt.toLocaleString()}</td>
+            <td class="act">
+              <button class="rc-icon-btn danger" data-rp-act="del" data-rid="${escapeAttr(r.id)}" title="삭제">🗑</button>
+            </td>
+          </tr>
+        `;
+      }).join('')
+    : (loaded
+        ? `<tr><td colspan="5" class="muted" style="text-align:center; padding:14px; font-size:12.5px;">등록된 수리내역이 없습니다.</td></tr>`
+        : `<tr><td colspan="5" class="muted" style="text-align:center; padding:14px; font-size:12px;">로딩 중…</td></tr>`);
+
+  const newRow = `
+    <tr class="rp-new-row" style="background:#f8fafc;">
+      <td><input type="date" id="rp-date" value="${todayStr}" style="font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; width:100%;"></td>
+      <td>
+        <select id="rp-type" style="font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; width:100%;">
+          ${typeOptions}
+        </select>
+      </td>
+      <td><input type="text" id="rp-desc" placeholder="작업내용" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%;"></td>
+      <td><input type="number" id="rp-amount" placeholder="금액 (±)" step="1" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%; text-align:right;"></td>
+      <td class="act"><button class="btn small primary" id="rp-add" type="button">+ 추가</button></td>
+    </tr>
+  `;
+
+  return `
+    <div class="card" id="rc-repair-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+        <h3 style="margin:0;">🛠 수리내역 <span class="muted-small" style="font-weight:400;">${rows.length}건 · 합계 ${sum.toLocaleString()}원</span></h3>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="rc-asset-table">
+          <thead>
+            <tr>
+              <th style="width:100px;">날짜</th>
+              <th style="width:100px;">품목</th>
+              <th>작업내용</th>
+              <th style="width:110px; text-align:right;">금액</th>
+              <th class="act">관리</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dataRows}
+            ${newRow}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+async function addRepair(customerId, payload) {
+  const supa = window.totalasAuth;
+  if (!supa) throw new Error('인증되지 않은 세션입니다.');
+  const id = `rp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+  const { error } = await supa.from('rental_repairs').insert({
+    id, customer_id: customerId, ...payload,
+  });
+  if (error) throw error;
+  await loadRepairsFor(customerId);
+}
+
+async function deleteRepair(customerId, repairId) {
+  const supa = window.totalasAuth;
+  if (!supa) throw new Error('인증되지 않은 세션입니다.');
+  const { error } = await supa.from('rental_repairs').delete().eq('id', repairId);
+  if (error) throw error;
+  await loadRepairsFor(customerId);
+}
+
+function bindRepairCard(c) {
+  const card = document.getElementById('rc-repair-card');
+  if (!card) return;
+
+  const addBtn = card.querySelector('#rp-add');
+  if (addBtn) {
+    addBtn.addEventListener('click', async () => {
+      const dateEl = card.querySelector('#rp-date');
+      const typeEl = card.querySelector('#rp-type');
+      const descEl = card.querySelector('#rp-desc');
+      const amountEl = card.querySelector('#rp-amount');
+      const item_type = (typeEl.value || '').trim();
+      const work_desc = (descEl.value || '').trim();
+      const amount = amountEl.value === '' ? 0 : Number(amountEl.value);
+      if (!item_type) { toast('품목을 선택하세요.', 'err'); return; }
+      if (Number.isNaN(amount)) { toast('금액이 올바르지 않습니다.', 'err'); return; }
+      addBtn.disabled = true;
+      addBtn.textContent = '저장 중…';
+      try {
+        await addRepair(c.id, {
+          service_date: dateEl.value || null,
+          item_type,
+          work_desc: work_desc || null,
+          amount,
+        });
+        toast('수리내역이 추가되었습니다.', 'ok');
+        renderDetail();
+      } catch (err) {
+        console.error(err);
+        toast('추가 실패: ' + (err.message || err), 'err');
+        addBtn.disabled = false;
+        addBtn.textContent = '+ 추가';
+      }
+    });
+  }
+
+  card.querySelectorAll('[data-rp-act="del"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const rid = btn.dataset.rid;
+      if (!rid) return;
+      if (!confirm('이 수리내역을 삭제하시겠습니까?')) return;
+      try {
+        await deleteRepair(c.id, rid);
+        toast('수리내역이 삭제되었습니다.', 'ok');
+        renderDetail();
+      } catch (err) {
+        console.error(err);
+        toast('삭제 실패: ' + (err.message || err), 'err');
+      }
+    });
+  });
+}
+
 // ── 상세 패널 hook (renderDetail 후처리) ─────────────
 const _originalRenderDetail = renderDetail;
 renderDetail = function () {
@@ -2674,7 +2820,7 @@ renderDetail = function () {
   if (!c) return;
 
   // 계약서 카드: Cross-sell 카드 바로 앞에 삽입
-  // (보유자산 → AS주기 → 기본정보 → 계약서 → Cross-sell 순)
+  // (보유자산 → 수리내역 → 기본정보 → 계약서 → Cross-sell 순)
   const detail = document.getElementById('rc-detail');
   const ctCardHTML = renderContractCard(c);
   const insightCard = Array.from(detail.querySelectorAll('.card'))
@@ -2685,7 +2831,7 @@ renderDetail = function () {
     detail.insertAdjacentHTML('beforeend', ctCardHTML);
   }
 
-  // 이벤트 바인딩
+  // 이벤트 바인딩 (계약서)
   const newBtn = document.getElementById('btn-ct-new');
   if (newBtn) newBtn.addEventListener('click', () => openContractEditor(c, null));
 
@@ -2700,9 +2846,17 @@ renderDetail = function () {
     });
   });
 
+  // 이벤트 바인딩 (수리내역)
+  bindRepairCard(c);
+
   // 계약서 비동기 로드 (없을 때만)
   if (!CT_STATE.byCustomer[c.id]) {
     loadContractsFor(c.id).then(() => renderDetail());
+  }
+
+  // 수리내역 비동기 로드 (없을 때만)
+  if (!REPAIR_STATE.byCustomer[c.id]) {
+    loadRepairsFor(c.id).then(() => renderDetail());
   }
 };
 
