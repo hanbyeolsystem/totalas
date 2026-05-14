@@ -2709,7 +2709,7 @@ function renderRepairCard(customer) {
         </select>
       </td>
       <td><input type="text" id="rp-desc" placeholder="작업내용" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%;"></td>
-      <td><input type="number" id="rp-amount" placeholder="금액 (±)" step="1" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%; text-align:right;"></td>
+      <td><input type="number" id="rp-amount" placeholder="금액 (자동 −)" step="1" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%; text-align:right;"></td>
       <td class="act"><button class="btn small primary" id="rp-add" type="button">+ 추가</button></td>
     </tr>
   `;
@@ -2772,9 +2772,11 @@ function bindRepairCard(c) {
       const amountEl = card.querySelector('#rp-amount');
       const item_type = (typeEl.value || '').trim();
       const work_desc = (descEl.value || '').trim();
-      const amount = amountEl.value === '' ? 0 : Number(amountEl.value);
+      const rawAmount = amountEl.value === '' ? 0 : Number(amountEl.value);
       if (!item_type) { toast('품목을 선택하세요.', 'err'); return; }
-      if (Number.isNaN(amount)) { toast('금액이 올바르지 않습니다.', 'err'); return; }
+      if (Number.isNaN(rawAmount)) { toast('금액이 올바르지 않습니다.', 'err'); return; }
+      // 기본 마이너스: 절대값을 음수로 강제 변환 (지출 기록 기본값)
+      const amount = rawAmount === 0 ? 0 : -Math.abs(rawAmount);
       addBtn.disabled = true;
       addBtn.textContent = '저장 중…';
       try {
