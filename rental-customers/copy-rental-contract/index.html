@@ -57,14 +57,6 @@ header{
 .section-body{padding:12px 14px;display:none}
 .section-body.open{display:block}
 
-/* ===== SUB-SECTION DIVIDER ===== */
-.subhead{
-  margin:14px -14px 8px;padding:6px 14px;
-  background:linear-gradient(90deg,#eef2ff 0%,transparent 100%);
-  border-left:3px solid var(--purple);
-  font-weight:700;font-size:12px;color:#374151
-}
-
 /* ===== FORM ===== */
 .frow{display:grid;gap:6px;margin-bottom:6px}
 .frow.c2{grid-template-columns:1fr 1fr}
@@ -329,7 +321,7 @@ textarea{resize:vertical;min-height:52px}
         </div>
         <div class="frow c2">
           <div><label>대표자</label><input type="text" id="c-ceo" placeholder="대표자명" oninput="renderAll()"></div>
-          <div><label>담당자</label><input type="text" id="c-person" placeholder="담당자명" oninput="renderAll()"></div>
+          <div><label>요청자 성함</label><input type="text" id="c-person" placeholder="요청자 성함" oninput="renderAll()"></div>
         </div>
         <div class="frow c2">
           <div><label>업태</label><input type="text" id="c-biz" placeholder="제조업" oninput="renderAll()"></div>
@@ -342,15 +334,9 @@ textarea{resize:vertical;min-height:52px}
           <div><label>전화</label><input type="text" id="c-tel" placeholder="전화번호" oninput="renderAll()"></div>
           <div><label>팩스</label><input type="text" id="c-fax" placeholder="팩스번호" oninput="renderAll()"></div>
         </div>
-        <div class="frow c1">
-          <div><label>이메일</label><input type="text" id="c-email" placeholder="이메일" oninput="renderAll()"></div>
-        </div>
-
-        <div class="subhead">📋 임대 신청 정보</div>
-
         <div class="frow c2">
-          <div><label>요청자 성함</label><input type="text" id="r-person" placeholder="담당자명" oninput="renderAll()"></div>
-          <div><label>휴대폰 번호</label><input type="text" id="r-mobile" placeholder="010-0000-0000" oninput="renderAll()"></div>
+          <div><label>핸드폰 번호</label><input type="text" id="r-mobile" placeholder="010-0000-0000" oninput="renderAll()"></div>
+          <div><label>이메일</label><input type="text" id="c-email" placeholder="이메일" oninput="renderAll()"></div>
         </div>
         <div class="frow c2">
           <div>
@@ -361,10 +347,9 @@ textarea{resize:vertical;min-height:52px}
               <option value="현금영수증">현금영수증</option>
             </select>
           </div>
-          <div><label>계산서 이메일</label><input type="text" id="r-billEmail" placeholder="billing@email.com" oninput="renderAll()"></div>
-        </div>
-        <div class="frow c2">
           <div><label>보증금 (원)</label><input type="number" id="r-deposit" value="0" oninput="renderAll()"></div>
+        </div>
+        <div class="frow c1">
           <div><label>기본 계약기간 (년)</label><input type="text" id="r-period" value="3" oninput="renderAll()"></div>
         </div>
       </div>
@@ -938,12 +923,12 @@ function renderRentalPage1() {
         <div class="rental-field-grid">
           <div class="rental-field-row"><span class="rfl">회사상호</span><span class="rfv">${esc(cu.name)}</span></div>
           <div class="rental-field-row"><span class="rfl">주민등록번호<br>(사업자번호)</span><span class="rfv">${esc(cu.reg)}</span></div>
-          <div class="rental-field-row"><span class="rfl">요청자 성함</span><span class="rfv">${esc(val('r-person'))}</span></div>
+          <div class="rental-field-row"><span class="rfl">요청자 성함</span><span class="rfv">${esc(val('c-person'))}</span></div>
           <div class="rental-field-row"><span class="rfl">휴대폰 번호</span><span class="rfv">${esc(val('r-mobile'))}</span></div>
           <div class="rental-field-row"><span class="rfl">설치 주소</span><span class="rfv">${esc(cu.addr)}</span></div>
           <div class="rental-field-row"><span class="rfl">전화 / 팩스</span><span class="rfv">${esc(cu.tel)}${cu.fax?' / '+esc(cu.fax):''}</span></div>
           <div class="rental-field-row"><span class="rfl">발행 구분</span><span class="rfv">□ ${esc(val('r-billing')||'전자세금계산서')}</span></div>
-          <div class="rental-field-row"><span class="rfl">이메일주소</span><span class="rfv">${esc(val('r-billEmail')||cu.email)}</span></div>
+          <div class="rental-field-row"><span class="rfl">이메일주소</span><span class="rfv">${esc(cu.email)}</span></div>
         </div>
       </div>
     </div>
@@ -1219,7 +1204,7 @@ function renderRentalPage3() {
     <div class="cms-section-title" style="font-size:8pt;padding:2px 6px">◈ 신청인 정보</div>
     <table class="cms-table" style="font-size:7.5pt">
       <tbody>
-        <tr><td class="cms-label" style="width:22%">신청인 성명</td><td>${esc(val('r-person')||cu.ceo||'')}</td><td class="cms-label" style="width:14%">이메일</td><td>${esc(cu.email||'')}</td></tr>
+        <tr><td class="cms-label" style="width:22%">신청인 성명</td><td>${esc(val('c-person')||cu.ceo||'')}</td><td class="cms-label" style="width:14%">이메일</td><td>${esc(cu.email||'')}</td></tr>
         <tr><td class="cms-label">주소</td><td colspan="3">${esc(cu.addr||'')}</td></tr>
         <tr><td class="cms-label">연락처</td><td>${esc(cu.tel||'')}</td><td class="cms-label">휴대폰번호</td><td>${esc(val('r-mobile')||'')}</td></tr>
         <tr><td class="cms-label">결제수단</td><td colspan="3">${isCard?'□ 계좌(CMS) &nbsp; ☑ 신용카드':'☑ 계좌(CMS) &nbsp; □ 신용카드'} &nbsp;<span style="font-size:6.5pt;color:#666">*평생계좌번호 이용 불가</span></td></tr>
@@ -1259,7 +1244,7 @@ function renderRentalPage3() {
             ${getSig('customer')
               ? `<div style="height:30px;display:flex;align-items:center;justify-content:center">${sigImg('customer',{h:'30px'})}</div>`
               : `<div style="height:22px"></div>`}
-            <div style="border-top:1px solid #999;padding-top:3px;font-size:7pt">${esc(val('r-person')||cu.ceo||'________')} &nbsp;${getSig('customer')?'<span style="color:#1a56db">✓</span>':'(인)'}</div>
+            <div style="border-top:1px solid #999;padding-top:3px;font-size:7pt">${esc(val('c-person')||cu.ceo||'________')} &nbsp;${getSig('customer')?'<span style="color:#1a56db">✓</span>':'(인)'}</div>
           </div>
         </div>
         <div style="font-size:6pt;color:#666;margin:3px 6px">*신청인과 예금주/카드주가 상이한 경우 예금주/카드주의 동의 필요</div>
@@ -1381,8 +1366,8 @@ function saveToParent() {
     rentalItems: JSON.parse(JSON.stringify(rentalItems)),
     rentalInfo: {
       docNum: val('docNum'), docDate: val('docDate'),
-      rPerson: val('r-person'), rMobile: val('r-mobile'),
-      rBilling: val('r-billing'), rBillEmail: val('r-billEmail'),
+      rPerson: val('c-person'), rMobile: val('r-mobile'),
+      rBilling: val('r-billing'), rBillEmail: val('c-email'),
       rDeposit: val('r-deposit'), rPeriod: val('r-period'),
       rBank: val('r-bank'), rAccount: val('r-account'),
       rHolder: val('r-holder'), rResid: val('r-resid'),
