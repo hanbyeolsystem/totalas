@@ -123,17 +123,28 @@ function bindUI() {
   document.getElementById('btn-add').addEventListener('click', () => openForm(null));
 
   // 상단 "새 계약서 작성" 버튼
+  // copy-rental-contract 자식 페이지를 새 창으로 열고, 활성 거래처 정보를 URL 해시로 전달
   const topCtBtn = document.getElementById('btn-ct-new-top');
   if (topCtBtn) {
     topCtBtn.addEventListener('click', () => {
       const sel = STATE.selectedId
         ? STATE.customers.find(x => x.id === STATE.selectedId)
         : null;
+      const params = new URLSearchParams();
       if (sel) {
-        openContractEditor(sel, null);
-      } else {
-        openContractEditor(null, null);  // 신규 거래처 흐름
+        params.set('customer_id', sel.id || '');
+        if (sel.company)      params.set('name',   sel.company);
+        if (sel.biz_no)       params.set('reg',    sel.biz_no);
+        if (sel.contact_name) {
+          params.set('ceo',    sel.contact_name);
+          params.set('person', sel.contact_name);
+        }
+        if (sel.address) params.set('addr',  sel.address);
+        if (sel.phone)   params.set('tel',   sel.phone);
+        if (sel.email)   params.set('email', sel.email);
       }
+      const url = './copy-rental-contract/index.html' + (params.toString() ? '#' + params.toString() : '');
+      window.open(url, '_blank');
     });
   }
 
@@ -148,6 +159,151 @@ function bindUI() {
       closeModal();
     }
   });
+
+  // copy-rental-contract 자식 창에서 보내는 저장 요청 수신
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || typeof m !== 'object') return;
+    if (m.type !== 'rental-contract-save') return;
+    handleChildContractSave(m, e.source);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 자식 페이지(copy-rental-contract)에서 받은 저장 요청 처리
+// 활성 거래처에 회사 정보 동기화 + rental_contracts 에 계약 + 임대 물품 저장
+// ─────────────────────────────────────────────────────────────
+async function handleChildContractSave(msg, sourceWin) {
+  const reply = (ok, message, extra) => {
+    try { sourceWin && sourceWin.postMessage(Object.assign({
+      type: 'rental-contract-save-result', ok, message
+    }, extra || {}), '*'); } catch (_) {}
+  };
+  const supa = window.totalasAuth;
+  if (!supa) { reply(false, '인증이 준비되지 않았습니다.'); return; }
+
+  const cu = msg.customer || {};
+  const company = (cu.name || '').trim();
+  if (!company) { reply(false, '회사명을 입력하세요.'); return; }
+
+  // ── 1) 대상 거래처 결정 ──
+  //   ① msg.customer_id 가 STATE에 있으면 사용 (부모가 선택해서 자식을 열었을 때)
+  //   ② STATE.selectedId 가 있으면 그 거래처 사용 (자식 열린 사이 선택이 바뀌었을 때 대비)
+  //   ③ DB에서 회사명으로 조회 후 첫 매치
+  //   ④ 없으면 신규 INSERT
+  let targetId = null;
+  let created = false;
+  try {
+    const candIds = [msg.customer_id, STATE.selectedId].filter(Boolean);
+    for (const cid of candIds) {
+      if (STATE.customers.some(x => x.id === cid)) { targetId = cid; break; }
+    }
+    if (!targetId) {
+      const { data: found, error: fErr } = await supa
+        .from('rental_customers').select('id').eq('company', company).limit(1);
+      if (fErr) throw fErr;
+      if (found && found.length) targetId = found[0].id;
+    }
+    if (!targetId) {
+      targetId = 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const { error: insErr } = await supa.from('rental_customers').insert({
+        id: targetId,
+        company,
+        contact_name: (cu.person || cu.ceo || '').trim() || null,
+        phone:        (cu.tel || '').trim() || null,
+        biz_no:       (cu.reg || '').trim() || null,
+        address:      (cu.addr || '').trim() || null,
+        email:        (cu.email || '').trim() || null,
+        active: true
+      });
+      if (insErr) throw insErr;
+      created = true;
+    } else {
+      // 기존 거래처: 입력된 값으로 업데이트 (빈 값은 덮어쓰지 않음)
+      const patch = {};
+      if (company)    patch.company      = company;
+      if (cu.person || cu.ceo) patch.contact_name = (cu.person || cu.ceo).trim();
+      if (cu.tel)     patch.phone        = cu.tel.trim();
+      if (cu.reg)     patch.biz_no       = cu.reg.trim();
+      if (cu.addr)    patch.address      = cu.addr.trim();
+      if (cu.email)   patch.email        = cu.email.trim();
+      if (Object.keys(patch).length) {
+        const { error: upErr } = await supa.from('rental_customers')
+          .update(patch).eq('id', targetId);
+        if (upErr) throw upErr;
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    reply(false, '거래처 저장 실패: ' + (err.message || err));
+    return;
+  }
+
+  // ── 2) rental_contracts upsert (임대 물품 + 계약 내용) ──
+  const ri = msg.rentalInfo || {};
+  const items = Array.isArray(msg.rentalItems) ? msg.rentalItems : [];
+  const contractId = (ri.docNum && ri.docNum.trim())
+    ? 'ct_' + targetId + '_' + ri.docNum.trim().replace(/[^a-zA-Z0-9\-]/g,'_')
+    : 'ct_' + targetId + '_' + Date.now().toString(36);
+  const contractPayload = {
+    id: contractId,
+    customer_id: targetId,
+    contract_no: ri.docNum || null,
+    contract_date: ri.docDate || new Date().toISOString().slice(0,10),
+    period_years: parseInt(ri.rPeriod, 10) || null,
+    deposit: parseInt(ri.rDeposit, 10) || 0,
+    install_fee: 0,
+    company_snapshot:      company,
+    contact_name_snapshot: cu.person || cu.ceo || '',
+    biz_no_snapshot:       cu.reg || '',
+    address_snapshot:      cu.addr || '',
+    phone_snapshot:        cu.tel || '',
+    email_snapshot:        cu.email || '',
+    items: items,                                    // 임대 물품 내역 (JSON)
+    terms: [ri.rt1, ri.rt2, ri.rt3, ri.rt4, ri.rt5].filter(Boolean),
+    extras: [ri.re1, ri.re2, ri.re3, ri.re4].filter(Boolean),
+    special_terms: [ri.rcSpecial1, ri.rcSpecial2].filter(Boolean).join('\n') || null,
+    payment_method: ri.rPayMethod || 'account',
+    payment_info: {
+      bank: ri.rBank || '', account: ri.rAccount || '',
+      holder: ri.rHolder || '', resid: ri.rResid || '',
+      debit_day: ri.rDebitDay || '', debit_amt: parseInt(ri.rDebitAmt, 10) || 0,
+      bank_memo: ri.rBankMemo || '', card_exp: ri.rCardExp || '',
+      bill_type: ri.rBilling || '', bill_email: ri.rBillEmail || '',
+      person: ri.rPerson || '', mobile: ri.rMobile || ''
+    },
+    sign_supplier:  null,
+    sign_applicant: ri.customerSig || null,
+    signature_type: ri.customerSig ? 'digital' : 'paper',
+    status: 'draft',
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    const { error: ctErr } = await supa.from('rental_contracts').upsert(contractPayload);
+    if (ctErr) throw ctErr;
+  } catch (err) {
+    console.error(err);
+    reply(false, '계약 저장 실패: ' + (err.message || err), { customer_id: targetId });
+    // 거래처는 살아 있으니 customer_id 회신은 해줌
+    await loadAll(); renderList();
+    return;
+  }
+
+  // ── 3) UI 갱신 ──
+  try {
+    await loadAll();
+    STATE.selectedId = targetId;
+    renderList();
+    renderDetail();
+    if (typeof loadContractsFor === 'function') {
+      await loadContractsFor(targetId);
+      renderDetail();
+    }
+  } catch (err) { console.error(err); }
+
+  toast(created ? '신규 거래처 + 계약 저장 완료' : '계약 + 거래처 정보 동기화 완료', 'ok');
+  reply(true, created ? '신규 거래처 등록 + 계약 저장 완료' : '활성 거래처에 저장 완료', { customer_id: targetId });
 }
 
 // ─────────────────────────────────────────────────────────────
