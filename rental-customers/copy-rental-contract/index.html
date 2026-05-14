@@ -57,6 +57,14 @@ header{
 .section-body{padding:12px 14px;display:none}
 .section-body.open{display:block}
 
+/* ===== SUB-SECTION DIVIDER ===== */
+.subhead{
+  margin:14px -14px 8px;padding:6px 14px;
+  background:linear-gradient(90deg,#eef2ff 0%,transparent 100%);
+  border-left:3px solid var(--purple);
+  font-weight:700;font-size:12px;color:#374151
+}
+
 /* ===== FORM ===== */
 .frow{display:grid;gap:6px;margin-bottom:6px}
 .frow.c2{grid-template-columns:1fr 1fr}
@@ -309,10 +317,10 @@ textarea{resize:vertical;min-height:52px}
       <input type="date" id="docDate" oninput="renderAll()" style="width:130px">
     </div>
 
-    <!-- 거래처 섹션 -->
+    <!-- 거래처 · 임대 신청정보 (통합) -->
     <div class="section">
       <div class="section-hd open" onclick="toggleSection(this)">
-        <span>👥 거래처 정보</span><span class="arrow">▼</span>
+        <span>👥 거래처 · 임대 신청정보</span><span class="arrow">▼</span>
       </div>
       <div class="section-body open">
         <div class="frow c2">
@@ -337,15 +345,9 @@ textarea{resize:vertical;min-height:52px}
         <div class="frow c1">
           <div><label>이메일</label><input type="text" id="c-email" placeholder="이메일" oninput="renderAll()"></div>
         </div>
-      </div>
-    </div>
 
-    <!-- ===== 임대 신청정보 ===== -->
-    <div class="section">
-      <div class="section-hd open" onclick="toggleSection(this)">
-        <span>📋 임대 신청정보</span><span class="arrow">▼</span>
-      </div>
-      <div class="section-body open">
+        <div class="subhead">📋 임대 신청 정보</div>
+
         <div class="frow c2">
           <div><label>요청자 성함</label><input type="text" id="r-person" placeholder="담당자명" oninput="renderAll()"></div>
           <div><label>휴대폰 번호</label><input type="text" id="r-mobile" placeholder="010-0000-0000" oninput="renderAll()"></div>
