@@ -658,11 +658,12 @@ function renderDetail() {
     </div>
   `;
 
-  // 4) 수리내역 표 (asCard 자리 — hook 에서 데이터 로드 후 채워짐)
-  const repairCard = renderRepairCard(c);
+  // 4) 수리내역(지출) + 판매/수리(수익) 카드 — hook 에서 데이터 로드 후 채워짐
+  const expenseCard = renderRepairCard(c, 'expense');
+  const incomeCard  = renderRepairCard(c, 'income');
 
-  // 순서: 보유자산 → 수리내역 → 기본정보 → (hook 으로 계약서 카드 삽입) → Cross-sell 인사이트
-  detail.innerHTML = assetCard + repairCard + infoCard + insightCard;
+  // 순서: 보유자산 → 수리내역(지출) → 판매/수리(수익) → 기본정보 → (hook 으로 계약서) → Cross-sell
+  detail.innerHTML = assetCard + expenseCard + incomeCard + infoCard + insightCard;
 
   document.getElementById('btn-edit').addEventListener('click', () => openForm(c));
   document.getElementById('btn-delete').addEventListener('click', () => deleteCustomer(c));
@@ -2644,11 +2645,21 @@ async function deleteContract() {
   }
 }
 
-// ── 수리내역 (rental_repairs) ────────────────────────
+// ── 수리내역 / 판매·수리 (rental_repairs) ─────────────
 const REPAIR_STATE = {
-  byCustomer: {}, // { customer_id: [repairs...] }
+  byCustomer: {},   // { customer_id: [repairs...] }
+  editingId: null,  // 인라인 수정 중인 행 id
 };
-const REPAIR_TYPES = ['출장', '부품교체', '토너'];
+
+// 품목 카테고리 — item_type 으로 expense / income 분류
+const REPAIR_CATS = {
+  expense: { types: ['출장', '여분토너', '부품교체'], sign: -1, label: '수리내역',  icon: '🛠', color: '#dc2626' },
+  income:  { types: ['판매', '수리'],                  sign: +1, label: '판매/수리', icon: '💰', color: '#059669' },
+};
+function modeOfType(type) {
+  if (REPAIR_CATS.income.types.includes(type)) return 'income';
+  return 'expense';
+}
 
 async function loadRepairsFor(customerId) {
   const supa = window.totalasAuth;
@@ -2670,61 +2681,85 @@ async function loadRepairsFor(customerId) {
   }
 }
 
-function renderRepairCard(customer) {
-  const list = REPAIR_STATE.byCustomer[customer.id];
-  const loaded = Array.isArray(list);
-  const rows = loaded ? list : [];
+function renderRepairCard(customer, mode) {
+  const cat = REPAIR_CATS[mode];
+  const all = REPAIR_STATE.byCustomer[customer.id];
+  const loaded = Array.isArray(all);
+  const rows = loaded ? all.filter(r => modeOfType(r.item_type) === mode) : [];
   const sum = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const sumStyle = sum < 0 ? 'color:#dc2626;' : (sum > 0 ? 'color:#059669;' : '');
   const today = new Date();
   const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const typeOptions = cat.types.map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('');
 
-  const typeOptions = REPAIR_TYPES.map(t => `<option value="${escapeAttr(t)}">${escapeHtml(t)}</option>`).join('');
+  const inputStyle = 'font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; width:100%;';
 
   const dataRows = rows.length
     ? rows.map(r => {
         const amt = Number(r.amount) || 0;
-        const amtColor = amt < 0 ? 'color:#dc2626;' : (amt > 0 ? 'color:#0f172a;' : 'color:#94a3b8;');
+        const amtColor = amt < 0 ? 'color:#dc2626;' : (amt > 0 ? 'color:#059669;' : 'color:#94a3b8;');
+        // 인라인 수정 모드
+        if (REPAIR_STATE.editingId === r.id) {
+          const editTypeOptions = cat.types.map(t =>
+            `<option value="${escapeAttr(t)}" ${t === r.item_type ? 'selected' : ''}>${escapeHtml(t)}</option>`
+          ).join('');
+          const absAmt = Math.abs(amt);
+          return `
+            <tr data-rid="${escapeAttr(r.id)}" class="rp-edit-row" style="background:#fef9c3;">
+              <td><input type="date" data-rp-edit-field="service_date" value="${escapeAttr((r.service_date || '').slice(0,10))}" style="${inputStyle}"></td>
+              <td><select data-rp-edit-field="item_type" style="${inputStyle}">${editTypeOptions}</select></td>
+              <td><input type="text" data-rp-edit-field="work_desc" value="${escapeAttr(r.work_desc || '')}" style="${inputStyle} text-align:left;"></td>
+              <td><input type="number" data-rp-edit-field="amount" value="${absAmt}" step="1" style="${inputStyle} text-align:right;"></td>
+              <td class="act" style="white-space:nowrap;">
+                <button class="rc-icon-btn" data-rp-act="save" data-rid="${escapeAttr(r.id)}" title="저장" style="color:#059669;">✓</button>
+                <button class="rc-icon-btn" data-rp-act="cancel" title="취소">✕</button>
+              </td>
+            </tr>
+          `;
+        }
         return `
           <tr data-rid="${escapeAttr(r.id)}">
             <td class="muted-small">${escapeHtml((r.service_date || '').slice(0, 10))}</td>
             <td>${escapeHtml(r.item_type || '-')}</td>
             <td>${escapeHtml(r.work_desc || '-')}</td>
             <td style="text-align:right; font-weight:600; ${amtColor}">${amt.toLocaleString()}</td>
-            <td class="act">
+            <td class="act" style="white-space:nowrap;">
+              <button class="rc-icon-btn" data-rp-act="edit" data-rid="${escapeAttr(r.id)}" title="수정">✏</button>
               <button class="rc-icon-btn danger" data-rp-act="del" data-rid="${escapeAttr(r.id)}" title="삭제">🗑</button>
             </td>
           </tr>
         `;
       }).join('')
     : (loaded
-        ? `<tr><td colspan="5" class="muted" style="text-align:center; padding:14px; font-size:12.5px;">등록된 수리내역이 없습니다.</td></tr>`
+        ? `<tr><td colspan="5" class="muted" style="text-align:center; padding:14px; font-size:12.5px;">등록된 ${cat.label}이(가) 없습니다.</td></tr>`
         : `<tr><td colspan="5" class="muted" style="text-align:center; padding:14px; font-size:12px;">로딩 중…</td></tr>`);
 
+  const signLabel = cat.sign < 0 ? '자동 −' : '자동 +';
   const newRow = `
-    <tr class="rp-new-row" style="background:#f8fafc;">
-      <td><input type="date" id="rp-date" value="${todayStr}" style="font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; width:100%;"></td>
+    <tr class="rp-new-row" data-rp-mode="${mode}" style="background:#f8fafc;">
+      <td><input type="date" data-rp-new="service_date" value="${todayStr}" style="${inputStyle}"></td>
       <td>
-        <select id="rp-type" style="font-size:12px; padding:4px 6px; border:1px solid var(--border); border-radius:4px; width:100%;">
+        <select data-rp-new="item_type" style="${inputStyle}">
           ${typeOptions}
         </select>
       </td>
-      <td><input type="text" id="rp-desc" placeholder="작업내용" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%;"></td>
-      <td><input type="number" id="rp-amount" placeholder="금액 (자동 −)" step="1" style="font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; width:100%; text-align:right;"></td>
-      <td class="act"><button class="btn small primary" id="rp-add" type="button">+ 추가</button></td>
+      <td><input type="text" data-rp-new="work_desc" placeholder="작업내용" style="${inputStyle} padding-left:8px; text-align:left;"></td>
+      <td><input type="number" data-rp-new="amount" placeholder="금액 (${signLabel})" step="1" style="${inputStyle} padding-left:8px; text-align:right;"></td>
+      <td class="act"><button class="btn small primary" data-rp-act="add" data-rp-mode="${mode}" type="button">+ 추가</button></td>
     </tr>
   `;
 
   return `
-    <div class="card" id="rc-repair-card">
+    <div class="card rc-repair-card" data-rp-mode="${mode}">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-        <h3 style="margin:0;">🛠 수리내역 <span class="muted-small" style="font-weight:400;">${rows.length}건 · 합계 ${sum.toLocaleString()}원</span></h3>
+        <h3 style="margin:0;">${cat.icon} ${cat.label} <span class="muted-small" style="font-weight:400;">${rows.length}건 · 합계 <b style="${sumStyle}">${sum.toLocaleString()}원</b></span></h3>
       </div>
       <div style="overflow-x:auto;">
         <table class="rc-asset-table">
           <thead>
             <tr>
               <th style="width:100px;">날짜</th>
-              <th style="width:100px;">품목</th>
+              <th style="width:110px;">품목</th>
               <th>작업내용</th>
               <th style="width:110px; text-align:right;">금액</th>
               <th class="act">관리</th>
@@ -2751,6 +2786,16 @@ async function addRepair(customerId, payload) {
   await loadRepairsFor(customerId);
 }
 
+async function updateRepair(customerId, repairId, payload) {
+  const supa = window.totalasAuth;
+  if (!supa) throw new Error('인증되지 않은 세션입니다.');
+  const { error } = await supa.from('rental_repairs')
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq('id', repairId);
+  if (error) throw error;
+  await loadRepairsFor(customerId);
+}
+
 async function deleteRepair(customerId, repairId) {
   const supa = window.totalasAuth;
   if (!supa) throw new Error('인증되지 않은 세션입니다.');
@@ -2759,56 +2804,107 @@ async function deleteRepair(customerId, repairId) {
   await loadRepairsFor(customerId);
 }
 
-function bindRepairCard(c) {
-  const card = document.getElementById('rc-repair-card');
-  if (!card) return;
+function bindRepairCards(c) {
+  document.querySelectorAll('.rc-repair-card').forEach(card => {
+    const mode = card.dataset.rpMode;
+    const cat = REPAIR_CATS[mode];
 
-  const addBtn = card.querySelector('#rp-add');
-  if (addBtn) {
-    addBtn.addEventListener('click', async () => {
-      const dateEl = card.querySelector('#rp-date');
-      const typeEl = card.querySelector('#rp-type');
-      const descEl = card.querySelector('#rp-desc');
-      const amountEl = card.querySelector('#rp-amount');
-      const item_type = (typeEl.value || '').trim();
-      const work_desc = (descEl.value || '').trim();
-      const rawAmount = amountEl.value === '' ? 0 : Number(amountEl.value);
-      if (!item_type) { toast('품목을 선택하세요.', 'err'); return; }
-      if (Number.isNaN(rawAmount)) { toast('금액이 올바르지 않습니다.', 'err'); return; }
-      // 기본 마이너스: 절대값을 음수로 강제 변환 (지출 기록 기본값)
-      const amount = rawAmount === 0 ? 0 : -Math.abs(rawAmount);
-      addBtn.disabled = true;
-      addBtn.textContent = '저장 중…';
-      try {
-        await addRepair(c.id, {
-          service_date: dateEl.value || null,
-          item_type,
-          work_desc: work_desc || null,
-          amount,
+    // 추가 버튼
+    const addBtn = card.querySelector('[data-rp-act="add"]');
+    if (addBtn) {
+      addBtn.addEventListener('click', async () => {
+        const newRow = card.querySelector('.rp-new-row');
+        const dateEl = newRow.querySelector('[data-rp-new="service_date"]');
+        const typeEl = newRow.querySelector('[data-rp-new="item_type"]');
+        const descEl = newRow.querySelector('[data-rp-new="work_desc"]');
+        const amountEl = newRow.querySelector('[data-rp-new="amount"]');
+        const item_type = (typeEl.value || '').trim();
+        const work_desc = (descEl.value || '').trim();
+        const rawAmount = amountEl.value === '' ? 0 : Number(amountEl.value);
+        if (!item_type) { toast('품목을 선택하세요.', 'err'); return; }
+        if (Number.isNaN(rawAmount)) { toast('금액이 올바르지 않습니다.', 'err'); return; }
+        // 카테고리 부호 자동 적용: expense → 음수, income → 양수
+        const amount = rawAmount === 0 ? 0 : cat.sign * Math.abs(rawAmount);
+        addBtn.disabled = true;
+        addBtn.textContent = '저장 중…';
+        try {
+          await addRepair(c.id, {
+            service_date: dateEl.value || null,
+            item_type,
+            work_desc: work_desc || null,
+            amount,
+          });
+          toast(`${cat.label} 추가되었습니다.`, 'ok');
+          renderDetail();
+        } catch (err) {
+          console.error(err);
+          toast('추가 실패: ' + (err.message || err), 'err');
+          addBtn.disabled = false;
+          addBtn.textContent = '+ 추가';
+        }
+      });
+    }
+
+    // 수정 / 삭제 / 저장 / 취소 — event delegation
+    card.querySelectorAll('[data-rp-act]').forEach(btn => {
+      const act = btn.dataset.rpAct;
+      if (act === 'add') return; // already bound
+      if (act === 'edit') {
+        btn.addEventListener('click', () => {
+          REPAIR_STATE.editingId = btn.dataset.rid;
+          renderDetail();
         });
-        toast('수리내역이 추가되었습니다.', 'ok');
-        renderDetail();
-      } catch (err) {
-        console.error(err);
-        toast('추가 실패: ' + (err.message || err), 'err');
-        addBtn.disabled = false;
-        addBtn.textContent = '+ 추가';
-      }
-    });
-  }
-
-  card.querySelectorAll('[data-rp-act="del"]').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const rid = btn.dataset.rid;
-      if (!rid) return;
-      if (!confirm('이 수리내역을 삭제하시겠습니까?')) return;
-      try {
-        await deleteRepair(c.id, rid);
-        toast('수리내역이 삭제되었습니다.', 'ok');
-        renderDetail();
-      } catch (err) {
-        console.error(err);
-        toast('삭제 실패: ' + (err.message || err), 'err');
+      } else if (act === 'cancel') {
+        btn.addEventListener('click', () => {
+          REPAIR_STATE.editingId = null;
+          renderDetail();
+        });
+      } else if (act === 'save') {
+        btn.addEventListener('click', async () => {
+          const rid = btn.dataset.rid;
+          const row = card.querySelector(`tr[data-rid="${rid}"].rp-edit-row`);
+          if (!row) return;
+          const dateV = row.querySelector('[data-rp-edit-field="service_date"]').value;
+          const typeV = row.querySelector('[data-rp-edit-field="item_type"]').value;
+          const descV = row.querySelector('[data-rp-edit-field="work_desc"]').value;
+          const amountRaw = row.querySelector('[data-rp-edit-field="amount"]').value;
+          const editMode = modeOfType(typeV);
+          const sign = REPAIR_CATS[editMode].sign;
+          const amtNum = amountRaw === '' ? 0 : Number(amountRaw);
+          if (Number.isNaN(amtNum)) { toast('금액이 올바르지 않습니다.', 'err'); return; }
+          const amount = amtNum === 0 ? 0 : sign * Math.abs(amtNum);
+          btn.disabled = true;
+          try {
+            await updateRepair(c.id, rid, {
+              service_date: dateV || null,
+              item_type: typeV,
+              work_desc: (descV || '').trim() || null,
+              amount,
+            });
+            REPAIR_STATE.editingId = null;
+            toast('수정되었습니다.', 'ok');
+            renderDetail();
+          } catch (err) {
+            console.error(err);
+            toast('수정 실패: ' + (err.message || err), 'err');
+            btn.disabled = false;
+          }
+        });
+      } else if (act === 'del') {
+        btn.addEventListener('click', async () => {
+          const rid = btn.dataset.rid;
+          if (!rid) return;
+          if (!confirm('이 항목을 삭제하시겠습니까?')) return;
+          try {
+            await deleteRepair(c.id, rid);
+            if (REPAIR_STATE.editingId === rid) REPAIR_STATE.editingId = null;
+            toast('삭제되었습니다.', 'ok');
+            renderDetail();
+          } catch (err) {
+            console.error(err);
+            toast('삭제 실패: ' + (err.message || err), 'err');
+          }
+        });
       }
     });
   });
@@ -2848,8 +2944,8 @@ renderDetail = function () {
     });
   });
 
-  // 이벤트 바인딩 (수리내역)
-  bindRepairCard(c);
+  // 이벤트 바인딩 (수리내역 / 판매·수리)
+  bindRepairCards(c);
 
   // 계약서 비동기 로드 (없을 때만)
   if (!CT_STATE.byCustomer[c.id]) {
