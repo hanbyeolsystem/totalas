@@ -1048,8 +1048,20 @@ function openAssetForm(customer, existing) {
           throw asErr;
         }
       }
+      // 신규 자산 추가 시 — 가장 최근 계약서 items 에 자동 반영
+      let ctSyncMsg = '';
+      if (!existing) {
+        try {
+          ctSyncMsg = await syncAssetToLatestContract(customer.id, itemPayload, assignPayload);
+        } catch (syncErr) {
+          console.warn('계약서 동기화 실패:', syncErr.message || syncErr);
+          ctSyncMsg = ' (계약서 동기화 실패)';
+        }
+      }
+
       closeModal();
-      toast(existing ? '자산이 수정되었습니다.' : '자산이 추가되었습니다.', 'ok');
+      const baseMsg = existing ? '자산이 수정되었습니다.' : '자산이 추가되었습니다.';
+      toast(baseMsg + ctSyncMsg, 'ok');
       await loadAll();
       renderDetail();
     } catch (err) {
@@ -1061,6 +1073,43 @@ function openAssetForm(customer, existing) {
   });
 
   document.getElementById('rc-modal').classList.add('show');
+}
+
+// 신규 자산 → 가장 최근 계약서 items 에 추가 (added_date 기록)
+async function syncAssetToLatestContract(customerId, itemPayload, assignPayload) {
+  const supa = window.totalasAuth;
+  if (!supa) return '';
+  const list = await loadContractsFor(customerId);
+  if (!list || !list.length) return '';
+  const latest = list[0];
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const modelLabel = [itemPayload.brand, itemPayload.model].filter(Boolean).join(' ').trim();
+  const noteParts = [];
+  if (itemPayload.serial) noteParts.push(`S/N ${itemPayload.serial}`);
+  if (itemPayload.subtype) noteParts.push(itemPayload.subtype);
+  const newRow = {
+    model: modelLabel || itemPayload.model || '',
+    bw_free: Number(assignPayload.bw_free) || 0,
+    co_free: Number(assignPayload.co_free) || 0,
+    bw_rate: Number(assignPayload.bw_rate) || 0,
+    co_rate: Number(assignPayload.co_rate) || 0,
+    qty: 1,
+    monthly_fee: Number(assignPayload.monthly_fee) || 0,
+    note: noteParts.join(' · '),
+    added_date: todayStr,
+  };
+  const items = Array.isArray(latest.items) ? latest.items.slice() : [];
+  items.push(newRow);
+  const { error } = await supa
+    .from('rental_contracts')
+    .update({ items, updated_at: new Date().toISOString() })
+    .eq('id', latest.id);
+  if (error) throw error;
+  // 캐시 갱신
+  latest.items = items;
+  CT_STATE.byCustomer[customerId] = list;
+  return ` · 계약서 ${latest.contract_no || latest.id}에 추가됨 (재출력·재서명 필요)`;
 }
 
 async function deleteAsset(customer, assignment) {
@@ -1550,9 +1599,12 @@ function renderItemRows() {
     const fixed = !!r.fixed_quota;
     const dis = fixed ? 'disabled' : '';
     const sub = calcRowTotal(r);
+    const addedBadge = r.added_date
+      ? `<div class="ct-row-added" title="추가일 (보유자산에서 자동 반영)">+${escapeHtml(r.added_date)}</div>`
+      : '';
     return `
       <tr data-row="${i}">
-        <td><input class="ct-input ed" data-row-field="model" value="${escapeAttr(r.model || '')}" placeholder="${escapeAttr(r._preset || '모델')}"></td>
+        <td><input class="ct-input ed" data-row-field="model" value="${escapeAttr(r.model || '')}" placeholder="${escapeAttr(r._preset || '모델')}">${addedBadge}</td>
         <td><input type="number" class="ct-input ed num" data-row-field="bw_free" value="${escapeAttr(r.bw_free ?? 0)}" ${dis}></td>
         <td><input type="number" class="ct-input ed num" data-row-field="co_free" value="${escapeAttr(r.co_free ?? 0)}" ${dis}></td>
         <td><input type="number" class="ct-input ed num" data-row-field="bw_rate" value="${escapeAttr(r.bw_rate ?? 0)}" ${dis}></td>
@@ -2621,14 +2673,14 @@ renderDetail = function () {
   const c = STATE.customers.find(x => x.id === STATE.selectedId);
   if (!c) return;
 
-  // 계약서 카드: Cross-sell 인사이트 카드 바로 앞에 삽입
-  // (Cross-sell 이 항상 맨 마지막에 보이도록 사용자 요청 반영)
+  // 계약서 카드: 보유자산 카드 바로 위에 삽입
+  // (기본정보 → 계약서 → 보유자산 → AS주기 → Cross-sell 순)
   const detail = document.getElementById('rc-detail');
   const ctCardHTML = renderContractCard(c);
-  const cards = detail.querySelectorAll('.card');
-  const lastCard = cards[cards.length - 1];  // Cross-sell 카드 (renderDetail 마지막)
-  if (lastCard && /Cross-sell/i.test(lastCard.textContent || '')) {
-    lastCard.insertAdjacentHTML('beforebegin', ctCardHTML);
+  const assetCard = Array.from(detail.querySelectorAll('.card'))
+    .find(el => /보유\s*자산/.test(el.textContent || ''));
+  if (assetCard) {
+    assetCard.insertAdjacentHTML('beforebegin', ctCardHTML);
   } else {
     detail.insertAdjacentHTML('beforeend', ctCardHTML);
   }
