@@ -364,15 +364,16 @@ textarea{resize:vertical;min-height:52px}
         <div class="items-wrap">
           <table class="ri-tbl">
             <thead><tr>
-              <th style="width:22%">모델명</th>
-              <th style="width:11%">기본(흑)<br>매수</th>
-              <th style="width:11%">기본(컬)<br>매수</th>
-              <th style="width:11%">추가(흑)<br>원/장</th>
-              <th style="width:11%">추가(컬)<br>원/장</th>
-              <th style="width:8%">수량<br>(대)</th>
-              <th style="width:14%">설치비</th>
-              <th style="width:16%">월렌탈료<br>(VAT별도)</th>
-              <th style="width:6%">삭제</th>
+              <th style="width:13%">품목</th>
+              <th style="width:17%">모델명</th>
+              <th style="width:9%">기본(흑)<br>매수</th>
+              <th style="width:9%">기본(컬)<br>매수</th>
+              <th style="width:9%">추가(흑)<br>원/장</th>
+              <th style="width:9%">추가(컬)<br>원/장</th>
+              <th style="width:6%">수량<br>(대)</th>
+              <th style="width:10%">설치비</th>
+              <th style="width:13%">월렌탈료<br>(VAT별도)</th>
+              <th style="width:5%">삭제</th>
             </tr></thead>
             <tbody id="riBody"></tbody>
           </table>
@@ -769,7 +770,7 @@ function getDocDate() { return val('docDate') || today(); }
 // RENTAL CONTRACT
 // =============================================
 function addRentalItem() {
-  rentalItems.push({ name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 });
+  rentalItems.push({ subtype:'', name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 });
   renderRentalItemRows();
   updateRentalTotals();
   renderAll();
@@ -780,9 +781,17 @@ function removeRentalItem(i) {
   updateRentalTotals();
   renderAll();
 }
+// 임대거래처(rental_items.subtype)와 동일한 9 카테고리
+const RI_SUBTYPES = ['흑백복사기','컬러복사기','흑백레이저','컬러레이저','잉크젯','컴퓨터','모니터','웰리스','나스'];
+
 function renderRentalItemRows() {
-  $('riBody').innerHTML = rentalItems.map((it,i) => `
+  $('riBody').innerHTML = rentalItems.map((it,i) => {
+    const subOpts = ['<option value="">선택…</option>']
+      .concat(RI_SUBTYPES.map(s => `<option value="${esc(s)}" ${it.subtype===s?'selected':''}>${esc(s)}</option>`))
+      .join('');
+    return `
     <tr>
+      <td><select class="ri-sub" onchange="rentalItems[${i}].subtype=this.value;renderAll()" style="border:none;background:transparent;padding:3px 2px;font-size:11px;width:100%;font-family:inherit">${subOpts}</select></td>
       <td><input type="text" value="${esc(it.name)}" placeholder="모델명" oninput="rentalItems[${i}].name=this.value;renderAll()"></td>
       <td><input type="number" value="${it.bcount}" style="text-align:center" oninput="rentalItems[${i}].bcount=+this.value;renderAll()"></td>
       <td><input type="number" value="${it.ccount}" style="text-align:center" oninput="rentalItems[${i}].ccount=+this.value;renderAll()"></td>
@@ -792,7 +801,8 @@ function renderRentalItemRows() {
       <td class="ri-install"><input type="text" value="${esc(it.install)}" placeholder="무료" oninput="rentalItems[${i}].install=this.value;renderAll()"></td>
       <td><input type="number" value="${it.monthly}" style="text-align:right" oninput="rentalItems[${i}].monthly=+this.value;renderAll()"></td>
       <td style="text-align:center"><button class="del-btn" onclick="removeRentalItem(${i})">✕</button></td>
-    </tr>`).join('') || `<tr><td colspan="9" style="text-align:center;padding:10px;color:#999">물품을 추가하세요</td></tr>`;
+    </tr>`;
+  }).join('') || `<tr><td colspan="10" style="text-align:center;padding:10px;color:#999">물품을 추가하세요</td></tr>`;
 }
 function calcRentalTotal() {
   const tot = rentalItems.reduce((s,it) => s + (it.monthly * it.qty), 0);
@@ -1397,7 +1407,7 @@ function applyFullPayload(p) {
       monthly: Number(it.monthly ?? it.monthly_fee ?? 0)
     }));
     if (!rentalItems.length) {
-      rentalItems = [{ name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 }];
+      rentalItems = [{ subtype:'', name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 }];
     }
     renderRentalItemRows();
     updateRentalTotals();
@@ -1502,7 +1512,7 @@ window.addEventListener('message', (e) => {
   loadMyCompany();
   fillRentalDefaults();
   addRentalItem();
-  rentalItems[0] = { name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 };
+  rentalItems[0] = { subtype:'', name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 };
   renderRentalItemRows();
   updateRentalTotals();
   // 1) 큰 페이로드 (수정/인쇄 흐름) → 2) URL 해시 거래처 정보 (새 계약 흐름) 순으로 적용
