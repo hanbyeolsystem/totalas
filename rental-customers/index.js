@@ -2653,8 +2653,8 @@ const REPAIR_STATE = {
 
 // 품목 카테고리 — item_type 으로 expense / income 분류
 const REPAIR_CATS = {
-  expense: { types: ['출장', '여분토너', '부품교체'], sign: -1, label: '수리내역',  icon: '🛠', color: '#dc2626' },
-  income:  { types: ['판매', '수리'],                  sign: +1, label: '판매/수리', icon: '💰', color: '#059669' },
+  expense: { types: ['출장', '여분토너', '부품교체'], sign: -1, label: '무상수리내역',     icon: '🛠', color: '#dc2626' },
+  income:  { types: ['판매', '수리'],                  sign: +1, label: '유상판매수리내역', icon: '💰', color: '#059669' },
 };
 function modeOfType(type) {
   if (REPAIR_CATS.income.types.includes(type)) return 'income';
