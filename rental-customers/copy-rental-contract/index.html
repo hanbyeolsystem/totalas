@@ -1332,6 +1332,9 @@ function showToast(msg) {
 // =============================================
 // PARENT INTEGRATION
 // =============================================
+let parentCustomerId = null;
+let parentContractIdRef = null; // 부모에서 띄울 때 원본 계약 id (저장 시 _origin_id 로 회신)
+
 // URL 해시(#name=...&reg=...)로 부모에서 전달된 거래처 정보를 자식 폼에 채움
 function prefillFromHash() {
   const h = (location.hash || '').replace(/^#/, '');
@@ -1351,7 +1354,88 @@ function prefillFromHash() {
   return filled;
 }
 
-let parentCustomerId = null;
+// 토큰 기반: localStorage 에서 큰 페이로드(계약서 전체 데이터) 로드
+// 부모가 "수정/인쇄" 클릭 시 사용
+function prefillFromToken() {
+  const h = (location.hash || '').replace(/^#/, '');
+  if (!h) return false;
+  const p = new URLSearchParams(h);
+  const token = p.get('token');
+  if (!token) return false;
+  const key = 'hbs_pending_contract_' + token;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return false;
+    const payload = JSON.parse(raw);
+    applyFullPayload(payload);
+    localStorage.removeItem(key);
+    return true;
+  } catch (e) { console.error(e); return false; }
+}
+
+// 큰 페이로드 적용 (customer + rentalItems + rentalInfo)
+function applyFullPayload(p) {
+  if (!p || typeof p !== 'object') return;
+  // 부모 식별자
+  if (p.customer_id) parentCustomerId = p.customer_id;
+  if (p.contract_id) parentContractIdRef = p.contract_id;
+  // 거래처
+  const cu = p.customer || {};
+  ['name','reg','ceo','person','biz','item','addr','tel','fax','email'].forEach(k => {
+    if (cu[k] != null && $('c-'+k)) $('c-'+k).value = cu[k];
+  });
+  // 임대 물품 — 부모(snake_case)와 자식(camelCase) 양쪽 키 호환
+  if (Array.isArray(p.rentalItems)) {
+    rentalItems = p.rentalItems.map(it => ({
+      name:    it.name    || it.model       || '',
+      bcount:  Number(it.bcount  ?? it.bw_free   ?? 0),
+      ccount:  Number(it.ccount  ?? it.co_free   ?? 0),
+      bprice:  Number(it.bprice  ?? it.bw_rate   ?? 0),
+      cprice:  Number(it.cprice  ?? it.co_rate   ?? 0),
+      qty:     Number(it.qty     ?? 1),
+      install: it.install || '무료',
+      monthly: Number(it.monthly ?? it.monthly_fee ?? 0)
+    }));
+    if (!rentalItems.length) {
+      rentalItems = [{ name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 }];
+    }
+    renderRentalItemRows();
+    updateRentalTotals();
+  }
+  // 임대 신청·자동이체·약관 필드
+  const ri = p.rentalInfo || {};
+  const mapInfo = {
+    'docNum':'docNum', 'docDate':'docDate',
+    'r-mobile':'rMobile',
+    'r-billing':'rBilling',
+    'r-deposit':'rDeposit', 'r-period':'rPeriod',
+    'r-bank':'rBank', 'r-account':'rAccount',
+    'r-holder':'rHolder', 'r-resid':'rResid',
+    'r-debitDay':'rDebitDay', 'r-debitAmt':'rDebitAmt',
+    'r-payMethod':'rPayMethod', 'r-bankMemo':'rBankMemo', 'r-cardExp':'rCardExp',
+    'rt1':'rt1','rt2':'rt2','rt3':'rt3','rt4':'rt4','rt5':'rt5',
+    're1':'re1','re2':'re2','re3':'re3','re4':'re4',
+    'cms-terms':'cmsTerms','cms-pi':'cmsPi','cms-delegate':'cmsDelegate','cms-sms':'cmsSms',
+    'rc-art1':'rcArt1','rc-art2':'rcArt2','rc-art3':'rcArt3','rc-art4':'rcArt4',
+    'rc-art5':'rcArt5','rc-art6':'rcArt6','rc-art7':'rcArt7','rc-art8':'rcArt8',
+    'rc-art9':'rcArt9','rc-art10':'rcArt10','rc-auto':'rcAuto','rc-extra2':'rcExtra2',
+    'rc-special1':'rcSpecial1','rc-special2':'rcSpecial2'
+  };
+  Object.entries(mapInfo).forEach(([fid, key]) => {
+    if (ri[key] != null && $(fid)) $(fid).value = ri[key];
+  });
+  if (ri.customerSig) customerSig = ri.customerSig;
+}
+
+// URL hash 의 action=print 이면 렌더 완료 후 인쇄 다이얼로그 자동 표시
+function tryAutoPrint() {
+  const h = (location.hash || '').replace(/^#/, '');
+  if (!h) return;
+  const p = new URLSearchParams(h);
+  if (p.get('action') === 'print') {
+    setTimeout(() => printRentalAll(), 600);
+  }
+}
 
 // 저장: 부모(임대거래처) 페이지로 데이터 전송 → Supabase 저장 위탁
 function saveToParent() {
@@ -1362,6 +1446,7 @@ function saveToParent() {
   const payload = {
     type: 'rental-contract-save',
     customer_id: parentCustomerId || null,
+    origin_contract_id: parentContractIdRef || null,
     customer: getCust(),
     rentalItems: JSON.parse(JSON.stringify(rentalItems)),
     rentalInfo: {
@@ -1420,8 +1505,10 @@ window.addEventListener('message', (e) => {
   rentalItems[0] = { name:'', bcount:500, ccount:200, bprice:10, cprice:100, qty:1, install:'무료', monthly:0 };
   renderRentalItemRows();
   updateRentalTotals();
-  prefillFromHash();
+  // 1) 큰 페이로드 (수정/인쇄 흐름) → 2) URL 해시 거래처 정보 (새 계약 흐름) 순으로 적용
+  if (!prefillFromToken()) prefillFromHash();
   renderAll();
+  tryAutoPrint();
 })();
 </script>
 </body></html>

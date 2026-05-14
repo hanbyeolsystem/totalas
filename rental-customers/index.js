@@ -239,12 +239,11 @@ async function handleChildContractSave(msg, sourceWin) {
     return;
   }
 
-  // ── 2) rental_contracts upsert (임대 물품 + 계약 내용) ──
+  // ── 2) rental_contracts insert (버전 관리 — 항상 새 id, 이전 row 보존) ──
   const ri = msg.rentalInfo || {};
   const items = Array.isArray(msg.rentalItems) ? msg.rentalItems : [];
-  const contractId = (ri.docNum && ri.docNum.trim())
-    ? 'ct_' + targetId + '_' + ri.docNum.trim().replace(/[^a-zA-Z0-9\-]/g,'_')
-    : 'ct_' + targetId + '_' + Date.now().toString(36);
+  // 매 저장마다 새 id 생성 (수정해도 이전 계약서 row 그대로 남음)
+  const contractId = 'ct_' + targetId + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
   const contractPayload = {
     id: contractId,
     customer_id: targetId,
@@ -290,7 +289,56 @@ async function handleChildContractSave(msg, sourceWin) {
     return;
   }
 
-  // ── 3) UI 갱신 ──
+  // ── 3) 임대 물품 → rental_items + rental_assignments 자동 등록 ──
+  //     (모델명 + 컬러 여부로 9개 카테고리 자동 분류. qty 만큼 N개 row 생성)
+  //     이전 자산은 보존 (이력 유지) — 누적 시 임대 물품 내역에서 수동 정리
+  let assetInsertedCount = 0, assetSkipped = 0;
+  for (const it of items) {
+    const cls = classifyChildItem(it);
+    const startDate = contractPayload.contract_date;
+    const qty = Math.max(1, parseInt(it.qty, 10) || 1);
+    for (let q = 0; q < qty; q++) {
+      try {
+        const itemId = 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const { error: itErr } = await supa.from('rental_items').insert({
+          id: itemId,
+          category: cls.category,
+          subtype:  cls.subtype,
+          brand:    null,
+          model:    (it.name || '').trim() || cls.subtype,
+          serial:   null,
+          install_date: startDate,
+          status:   'active',
+          storage_gb: null,
+          notes:    '임대계약서 자동등록 (' + contractPayload.contract_no + ')'
+        });
+        if (itErr) throw itErr;
+
+        const aid = 'a_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        const { error: asErr } = await supa.from('rental_assignments').insert({
+          id: aid,
+          item_id: itemId,
+          customer_id: targetId,
+          start_date: startDate,
+          monthly_fee: Number(it.monthly) || 0,
+          bw_free:     Number(it.bcount)  || 0,
+          co_free:     Number(it.ccount)  || 0,
+          bw_rate:     Number(it.bprice)  || 0,
+          co_rate:     Number(it.cprice)  || 0
+        });
+        if (asErr) {
+          await supa.from('rental_items').delete().eq('id', itemId);
+          throw asErr;
+        }
+        assetInsertedCount++;
+      } catch (assetErr) {
+        console.warn('자산 등록 실패 (item:', it.name, '):', assetErr.message || assetErr);
+        assetSkipped++;
+      }
+    }
+  }
+
+  // ── 4) UI 갱신 ──
   try {
     await loadAll();
     STATE.selectedId = targetId;
@@ -302,8 +350,132 @@ async function handleChildContractSave(msg, sourceWin) {
     }
   } catch (err) { console.error(err); }
 
-  toast(created ? '신규 거래처 + 계약 저장 완료' : '계약 + 거래처 정보 동기화 완료', 'ok');
-  reply(true, created ? '신규 거래처 등록 + 계약 저장 완료' : '활성 거래처에 저장 완료', { customer_id: targetId });
+  const assetMsg = assetInsertedCount
+    ? ` · 임대 물품 ${assetInsertedCount}건 등록` + (assetSkipped ? ` (실패 ${assetSkipped})` : '')
+    : (items.length ? ' (물품 자동등록 실패)' : '');
+  toast((created ? '신규 거래처 + 계약 저장' : '계약 + 거래처 동기화') + assetMsg, assetSkipped && !assetInsertedCount ? 'err' : 'ok');
+  reply(true, (created ? '신규 거래처 등록 + 계약 저장' : '활성 거래처에 저장') + assetMsg, { customer_id: targetId, contract_id: contractId });
+}
+
+// ─────────────────────────────────────────────────────────────
+// 자식의 rentalItem → 부모의 9개 카테고리(rental_items.subtype) 자동 분류
+//   - 컬러 여부: ccount>0 || cprice>0
+//   - 키워드: 모델명에서 PC/모니터/웰리스/나스/레이저/잉크젯/복합기 등 매칭
+// ─────────────────────────────────────────────────────────────
+function classifyChildItem(it) {
+  const name  = String(it && it.name || '').toLowerCase();
+  const isColor = (Number(it && it.ccount) > 0) || (Number(it && it.cprice) > 0);
+  if (/\b(pc|컴퓨터|데스크|노트북|laptop|desktop)\b/.test(name))
+    return { category:'IT',   subtype:'컴퓨터' };
+  if (/모니터|monitor/.test(name))
+    return { category:'IT',   subtype:'모니터' };
+  if (/웰리스|wellis|wellness|제균|필터/.test(name))
+    return { category:'위생', subtype:'웰리스' };
+  if (/nas|나스/.test(name))
+    return { category:'IT',   subtype:'나스' };
+  if (/잉크젯|inkjet/.test(name))
+    return { category:'출력', subtype:'잉크젯' };
+  if (/레이저|laser/.test(name))
+    return { category:'출력', subtype: isColor ? '컬러레이저' : '흑백레이저' };
+  // 기본: 복사기/복합기/기타 출력기
+  return { category:'출력', subtype: isColor ? '컬러복합기' : '흑백복합기' };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 임대계약서(자식) 창 열기 — 수정/인쇄용
+// 큰 페이로드는 localStorage 토큰으로 전달 (URL 해시 한도 회피)
+// ─────────────────────────────────────────────────────────────
+function openChildContractWindow(customer, ct, autoPrint) {
+  const token = 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  // 부모의 ct 객체 → 자식이 기대하는 payload 모양으로 변환
+  const pi = (ct && ct.payment_info) || {};
+  const payload = {
+    customer_id: customer.id,
+    contract_id: ct ? ct.id : null,
+    customer: {
+      name:   customer.company      || '',
+      reg:    customer.biz_no       || '',
+      ceo:    customer.contact_name || '',  // 부모에 ceo 별도 컬럼 없음
+      person: customer.contact_name || '',
+      biz:    '',
+      item:   '',
+      addr:   customer.address      || '',
+      tel:    customer.phone        || '',
+      fax:    '',
+      email:  customer.email        || ''
+    },
+    rentalItems: (ct && Array.isArray(ct.items)) ? ct.items : [],
+    rentalInfo: ct ? {
+      docNum:    ct.contract_no    || '',
+      docDate:   ct.contract_date  || '',
+      rPeriod:   ct.period_years   || '',
+      rDeposit:  ct.deposit        || 0,
+      rMobile:   pi.mobile         || '',
+      rBilling:  pi.bill_type      || '전자세금계산서',
+      rBank:     pi.bank           || '',
+      rAccount:  pi.account        || '',
+      rHolder:   pi.holder         || '',
+      rResid:    pi.resid          || '',
+      rDebitDay: pi.debit_day      || '',
+      rDebitAmt: pi.debit_amt      || '',
+      rPayMethod: ct.payment_method || 'account',
+      rBankMemo: pi.bank_memo      || '',
+      rCardExp:  pi.card_exp       || '',
+      rt1: (ct.terms||[])[0] || '',
+      rt2: (ct.terms||[])[1] || '',
+      rt3: (ct.terms||[])[2] || '',
+      rt4: (ct.terms||[])[3] || '',
+      rt5: (ct.terms||[])[4] || '',
+      re1: (ct.extras||[])[0] || '',
+      re2: (ct.extras||[])[1] || '',
+      re3: (ct.extras||[])[2] || '',
+      re4: (ct.extras||[])[3] || '',
+      rcSpecial1: ((ct.special_terms || '').split('\n')[0] || '').trim(),
+      rcSpecial2: ((ct.special_terms || '').split('\n')[1] || '').trim(),
+      customerSig: ct.sign_applicant || ''
+    } : null
+  };
+  try {
+    localStorage.setItem('hbs_pending_contract_' + token, JSON.stringify(payload));
+    setTimeout(() => { try { localStorage.removeItem('hbs_pending_contract_' + token); } catch (_) {} }, 120000);
+  } catch (e) {
+    console.error('payload 저장 실패:', e);
+    toast('계약 데이터 전달 실패: ' + (e?.message || e), 'err');
+    return;
+  }
+  const params = new URLSearchParams();
+  params.set('token', token);
+  if (autoPrint) params.set('action', 'print');
+  // URL hash 거래처 기본 정보도 함께 — 토큰 로드 실패 시 fallback
+  if (customer.id)           params.set('customer_id', customer.id);
+  if (customer.company)      params.set('name',   customer.company);
+  if (customer.biz_no)       params.set('reg',    customer.biz_no);
+  if (customer.contact_name) params.set('person', customer.contact_name);
+  if (customer.address)      params.set('addr',   customer.address);
+  if (customer.phone)        params.set('tel',    customer.phone);
+  if (customer.email)        params.set('email',  customer.email);
+
+  window.open('./copy-rental-contract/index.html#' + params.toString(), '_blank');
+}
+
+// ─────────────────────────────────────────────────────────────
+// 계약서 row 삭제 — rental_contracts.delete + UI 갱신
+// (연결된 rental_assignments 는 보존 — 이력 유지)
+// ─────────────────────────────────────────────────────────────
+async function deleteContractRow(customer, ct) {
+  if (!confirm(`이 계약서를 삭제할까요?\n\n계약번호: ${ct.contract_no || '-'}\n작성일: ${ct.contract_date || '-'}\n\n※ 이 계약으로 등록된 임대 물품 자산은 그대로 남습니다.\n   필요 시 "임대 물품 내역"에서 따로 삭제하세요.`)) return;
+  const supa = window.totalasAuth;
+  if (!supa) { toast('인증이 준비되지 않았습니다.', 'err'); return; }
+  try {
+    const { error } = await supa.from('rental_contracts').delete().eq('id', ct.id);
+    if (error) throw error;
+    await loadContractsFor(customer.id);
+    renderDetail();
+    toast('계약서가 삭제되었습니다.', 'ok');
+  } catch (err) {
+    console.error(err);
+    toast('계약서 삭제 실패: ' + (err.message || err), 'err');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1490,8 +1662,8 @@ function renderContractCard(customer) {
     const items = Array.isArray(ct.items) ? ct.items : [];
     const grand = calcGrand(items);
     return `
-      <div class="rc-ct-row" data-ctid="${escapeAttr(ct.id)}">
-        <div class="rc-ct-row-main">
+      <div class="rc-ct-row" data-ctid="${escapeAttr(ct.id)}" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="rc-ct-row-main" style="flex:1; min-width:200px;">
           <div class="rc-ct-row-title">${escapeHtml(ct.contract_no || '-')} · ${escapeHtml(ct.contract_date || '-')}</div>
           <div class="rc-ct-row-sub">
             품목 ${items.length}건 · 월 합계 ${grand.total.toLocaleString()}원 (VAT포함)
@@ -1499,15 +1671,24 @@ function renderContractCard(customer) {
           </div>
         </div>
         <span class="rc-ct-badge ${status}">${statusLabel}</span>
+        <div style="display:flex; gap:4px;">
+          <button class="btn small ghost" data-ctact="print"  data-ctid="${escapeAttr(ct.id)}" title="임대계약서 창에서 인쇄">🖨 인쇄</button>
+          <button class="btn small ghost" data-ctact="edit"   data-ctid="${escapeAttr(ct.id)}" title="수정 — 저장하면 새 버전이 생성됩니다 (이전 계약서 보존)">✏ 수정</button>
+          <button class="btn small danger" data-ctact="delete" data-ctid="${escapeAttr(ct.id)}" title="이 계약서 삭제">🗑 삭제</button>
+        </div>
       </div>
     `;
   }).join('') || `<p class="muted" style="margin:0; font-size:12.5px;">아직 작성된 계약서가 없습니다.</p>`;
 
+  const hasContracts = list.length > 0;
   return `
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
         <h3 style="margin:0;">📄 계약서 <span class="muted-small" style="font-weight:400;">${list.length}건</span></h3>
-        <button class="btn small primary" id="btn-ct-new">+ 신규 계약서 작성</button>
+        <button class="btn small primary" id="btn-ct-print-latest" ${hasContracts ? '' : 'disabled'}
+                title="${hasContracts ? '가장 최근 계약서를 임대계약서 창에서 자동 인쇄' : '저장된 계약서가 없습니다'}">
+          🖨 기존 계약서 출력
+        </button>
       </div>
       ${rows}
     </div>
@@ -3086,17 +3267,29 @@ renderDetail = function () {
   }
 
   // 이벤트 바인딩 (계약서)
-  const newBtn = document.getElementById('btn-ct-new');
-  if (newBtn) newBtn.addEventListener('click', () => openContractEditor(c, null));
+  // [🖨 기존 계약서 출력] — 가장 최근 계약서를 임대계약서 창에서 자동 인쇄
+  const printLatestBtn = document.getElementById('btn-ct-print-latest');
+  if (printLatestBtn) {
+    printLatestBtn.addEventListener('click', () => {
+      const list = CT_STATE.byCustomer[c.id] || [];
+      if (!list.length) { toast('저장된 계약서가 없습니다.', 'err'); return; }
+      const latest = list[0]; // contract_date desc 정렬됨
+      openChildContractWindow(c, latest, /* autoPrint */ true);
+    });
+  }
 
-  detail.querySelectorAll('.rc-ct-row').forEach(row => {
-    row.addEventListener('click', () => {
-      const ctid = row.dataset.ctid;
-      const existing = (CT_STATE.byCustomer[c.id] || []).find(x => x.id === ctid);
+  // 계약서 row 의 [인쇄] [수정] [삭제] 버튼
+  detail.querySelectorAll('.rc-ct-row [data-ctact]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ctid = btn.dataset.ctid;
+      const list = CT_STATE.byCustomer[c.id] || [];
+      const existing = list.find(x => x.id === ctid);
       if (!existing) return;
-      const ctCopy = JSON.parse(JSON.stringify(existing));
-      ctCopy._existing = true;
-      openContractEditor(c, ctCopy);
+      const act = btn.dataset.ctact;
+      if (act === 'print')      openChildContractWindow(c, existing, true);
+      else if (act === 'edit')  openChildContractWindow(c, existing, false);
+      else if (act === 'delete') deleteContractRow(c, existing);
     });
   });
 
