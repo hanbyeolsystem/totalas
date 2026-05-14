@@ -280,58 +280,9 @@ async function handleChildContractSave(msg, sourceWin) {
     return;
   }
 
-  // ── 3) 임대 물품 → rental_items + rental_assignments 자동 등록 ──
-  //     자식에서 명시한 subtype 우선, 없으면 모델명/컬러 여부로 자동 분류 (fallback)
-  //     qty 만큼 N개 row 생성. 이전 자산은 보존 (이력 유지) — 누적 시 임대 물품 내역에서 수동 정리
-  let assetInsertedCount = 0, assetSkipped = 0;
-  for (const it of items) {
-    const cls = (it && it.subtype && SUBTYPE_TO_CATEGORY[it.subtype])
-      ? { category: SUBTYPE_TO_CATEGORY[it.subtype], subtype: it.subtype }
-      : classifyChildItem(it);
-    const startDate = contractPayload.contract_date;
-    const qty = Math.max(1, parseInt(it.qty, 10) || 1);
-    for (let q = 0; q < qty; q++) {
-      try {
-        const itemId = 'it_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        const { error: itErr } = await supa.from('rental_items').insert({
-          id: itemId,
-          category: cls.category,
-          subtype:  cls.subtype,
-          brand:    null,
-          model:    (it.name || '').trim() || cls.subtype,
-          serial:   null,
-          install_date: startDate,
-          status:   'active',
-          storage_gb: null,
-          notes:    '임대계약서 자동등록 (' + contractPayload.contract_no + ')'
-        });
-        if (itErr) throw itErr;
-
-        const aid = 'a_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        const { error: asErr } = await supa.from('rental_assignments').insert({
-          id: aid,
-          item_id: itemId,
-          customer_id: targetId,
-          start_date: startDate,
-          monthly_fee: Number(it.monthly) || 0,
-          bw_free:     Number(it.bcount)  || 0,
-          co_free:     Number(it.ccount)  || 0,
-          bw_rate:     Number(it.bprice)  || 0,
-          co_rate:     Number(it.cprice)  || 0
-        });
-        if (asErr) {
-          await supa.from('rental_items').delete().eq('id', itemId);
-          throw asErr;
-        }
-        assetInsertedCount++;
-      } catch (assetErr) {
-        console.warn('자산 등록 실패 (item:', it.name, '):', assetErr.message || assetErr);
-        assetSkipped++;
-      }
-    }
-  }
-
-  // ── 4) UI 갱신 ──
+  // ── 3) UI 갱신 ──
+  // 정책: 임대 물품 내역(rental_items + rental_assignments)은 "임대추가" 버튼으로만 추가됨.
+  // 임대계약서 저장은 rental_contracts 만 다루고, 자산 자동 등록은 하지 않는다.
   try {
     await loadAll();
     STATE.selectedId = targetId;
@@ -343,46 +294,8 @@ async function handleChildContractSave(msg, sourceWin) {
     }
   } catch (err) { console.error(err); }
 
-  const assetMsg = assetInsertedCount
-    ? ` · 임대 물품 ${assetInsertedCount}건 등록` + (assetSkipped ? ` (실패 ${assetSkipped})` : '')
-    : (items.length ? ' (물품 자동등록 실패)' : '');
-  toast((created ? '신규 거래처 + 계약 저장' : '계약 + 거래처 동기화') + assetMsg, assetSkipped && !assetInsertedCount ? 'err' : 'ok');
-  reply(true, (created ? '신규 거래처 등록 + 계약 저장' : '활성 거래처에 저장') + assetMsg, { customer_id: targetId, contract_id: contractId });
-}
-
-// ─────────────────────────────────────────────────────────────
-// rental_items.subtype → category 매핑 (자식에서 subtype 명시한 경우 사용)
-// ─────────────────────────────────────────────────────────────
-const SUBTYPE_TO_CATEGORY = {
-  '흑백복사기':'출력','컬러복사기':'출력',
-  '흑백레이저':'출력','컬러레이저':'출력','잉크젯':'출력',
-  '컴퓨터':'IT','모니터':'IT','나스':'IT',
-  '웰리스':'위생'
-};
-
-// ─────────────────────────────────────────────────────────────
-// 자식의 rentalItem → 부모의 9개 카테고리(rental_items.subtype) 자동 분류
-//   - 컬러 여부: ccount>0 || cprice>0
-//   - 키워드: 모델명에서 PC/모니터/웰리스/나스/레이저/잉크젯/복합기 등 매칭
-//   - 자식에서 it.subtype 을 명시했으면 그쪽이 우선 사용됨 (호출자에서 분기)
-// ─────────────────────────────────────────────────────────────
-function classifyChildItem(it) {
-  const name  = String(it && it.name || '').toLowerCase();
-  const isColor = (Number(it && it.ccount) > 0) || (Number(it && it.cprice) > 0);
-  if (/\b(pc|컴퓨터|데스크|노트북|laptop|desktop)\b/.test(name))
-    return { category:'IT',   subtype:'컴퓨터' };
-  if (/모니터|monitor/.test(name))
-    return { category:'IT',   subtype:'모니터' };
-  if (/웰리스|wellis|wellness|제균|필터/.test(name))
-    return { category:'위생', subtype:'웰리스' };
-  if (/nas|나스/.test(name))
-    return { category:'IT',   subtype:'나스' };
-  if (/잉크젯|inkjet/.test(name))
-    return { category:'출력', subtype:'잉크젯' };
-  if (/레이저|laser/.test(name))
-    return { category:'출력', subtype: isColor ? '컬러레이저' : '흑백레이저' };
-  // 기본: 복사기/복합기/기타 출력기
-  return { category:'출력', subtype: isColor ? '컬러복합기' : '흑백복합기' };
+  toast(created ? '신규 거래처 + 계약 저장 완료' : '계약 + 거래처 동기화 완료', 'ok');
+  reply(true, created ? '신규 거래처 등록 + 계약 저장 완료' : '활성 거래처에 저장 완료', { customer_id: targetId, contract_id: contractId });
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1528,88 +1441,78 @@ async function loadContractsFor(customerId) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 임대 계약 내역 카드 — 임대계약서(자식)에서 입력한 임대 물품 표시
-// 각 계약 row 의 items 배열(JSON)을 계약별로 그룹핑하여 표 렌더
+// 임대 계약 내역 카드 — 임대 물품 내역(rental_assignments) 기준으로 표시
+// 같은 (품목·모델·기본/추가 단가·월렌탈료) 조합으로 그룹핑하여 수량을 집계
 // ─────────────────────────────────────────────────────────────
 function renderContractItemsCard(customer) {
-  const list = CT_STATE.byCustomer[customer.id];
-  if (list == null) {
-    return `<div class="card">
-      <h3 style="margin:0 0 8px;">📋 임대 계약 내역</h3>
-      <p class="muted" style="margin:0; font-size:12.5px;">⏳ 계약서 로딩 중…</p>
-    </div>`;
-  }
-  // items 가 있는 계약만 추리고, 최신순(contract_date desc)
-  const withItems = (list || []).filter(ct => Array.isArray(ct.items) && ct.items.length > 0);
-  const totalLines = withItems.reduce((s, ct) => s + ct.items.length, 0);
-
-  if (!withItems.length) {
+  const assignments = customer._assignments || [];
+  if (!assignments.length) {
     return `<div class="card">
       <h3 style="margin:0 0 8px;">📋 임대 계약 내역 <span class="muted-small" style="font-weight:400;">0건</span></h3>
-      <p class="muted" style="margin:0; font-size:12.5px;">임대계약서에 입력된 임대 물품이 없습니다.</p>
+      <p class="muted" style="margin:0; font-size:12.5px;">등록된 임대 물품이 없습니다. 위 "+ 임대추가"로 자산을 등록하세요.</p>
     </div>`;
   }
 
-  const blocks = withItems.map(ct => {
-    const ctTotal = ct.items.reduce((s, r) => {
-      const monthly = Number(r.monthly_fee ?? r.monthly ?? 0);
-      const qty = Number(r.qty ?? 1);
-      return s + monthly * qty;
-    }, 0);
-    const rows = ct.items.map((r, i) => {
-      const subtype = r.subtype || '–';
-      const model   = r.model   || r.name || '–';
-      const qty     = Number(r.qty ?? 1);
-      const bcount  = Number(r.bw_free  ?? r.bcount  ?? 0);
-      const ccount  = Number(r.co_free  ?? r.ccount  ?? 0);
-      const bprice  = Number(r.bw_rate  ?? r.bprice  ?? 0);
-      const cprice  = Number(r.co_rate  ?? r.cprice  ?? 0);
-      const monthly = Number(r.monthly_fee ?? r.monthly ?? 0);
-      return `<tr>
-        <td>${i + 1}</td>
-        <td>${escapeHtml(subtype)}</td>
-        <td>${escapeHtml(model)}</td>
-        <td class="num">${qty}</td>
-        <td class="num">${bcount.toLocaleString()}</td>
-        <td class="num">${ccount.toLocaleString()}</td>
-        <td class="num">${bprice.toLocaleString()}</td>
-        <td class="num">${cprice.toLocaleString()}</td>
-        <td class="num"><strong>${monthly.toLocaleString()}</strong></td>
-      </tr>`;
-    }).join('');
-    return `
-      <div style="margin-bottom:14px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 8px; background:#f1f5f9; border-left:3px solid var(--primary, #1a56db); margin-bottom:6px;">
-          <strong style="font-size:12.5px;">${escapeHtml(ct.contract_no || '–')} · ${escapeHtml(ct.contract_date || '–')}</strong>
-          <span class="muted-small">${ct.items.length}개 품목 · 월 ${ctTotal.toLocaleString()}원 (VAT별도)</span>
-        </div>
-        <div style="overflow-x:auto;">
-          <table class="rc-asset-table" style="font-size:11.5px;">
-            <thead>
-              <tr>
-                <th style="width:4%;">#</th>
-                <th style="width:13%;">품목</th>
-                <th>모델명</th>
-                <th class="num" style="width:6%;">수량</th>
-                <th class="num" style="width:9%;">기본(흑)</th>
-                <th class="num" style="width:9%;">기본(컬)</th>
-                <th class="num" style="width:9%;">추가(흑)</th>
-                <th class="num" style="width:9%;">추가(컬)</th>
-                <th class="num" style="width:11%;">월렌탈료</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-      </div>
-    `;
-  }).join('');
+  // 그룹핑 키: 품목 + 모델 + 기본/추가 단가 + 월렌탈료
+  const groups = new Map();
+  for (const a of assignments) {
+    const it = a.rental_items || {};
+    const subtype     = it.subtype || '';
+    const model       = ((it.brand || '') + ' ' + (it.model || '')).trim();
+    const bw_free     = Number(a.bw_free)  || 0;
+    const co_free     = Number(a.co_free)  || 0;
+    const bw_rate     = Number(a.bw_rate)  || 0;
+    const co_rate     = Number(a.co_rate)  || 0;
+    const monthly_fee = Number(a.monthly_fee) || 0;
+    const key = [subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee].join('');
+    if (!groups.has(key)) {
+      groups.set(key, { subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee, qty: 0 });
+    }
+    groups.get(key).qty++;
+  }
+
+  const list = [...groups.values()].sort((a, b) =>
+    (a.subtype || '').localeCompare(b.subtype || '', 'ko') ||
+    (a.model   || '').localeCompare(b.model   || '', 'ko')
+  );
+
+  const totalMonthly = list.reduce((s, g) => s + (g.monthly_fee * g.qty), 0);
+
+  const rows = list.map((g, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${escapeHtml(g.subtype || '–')}</td>
+      <td>${escapeHtml(g.model   || '–')}</td>
+      <td class="num">${g.bw_free.toLocaleString()}</td>
+      <td class="num">${g.co_free.toLocaleString()}</td>
+      <td class="num">${g.bw_rate.toLocaleString()}</td>
+      <td class="num">${g.co_rate.toLocaleString()}</td>
+      <td class="num">${g.qty}</td>
+      <td class="num"><strong>${g.monthly_fee.toLocaleString()}</strong></td>
+    </tr>`).join('');
 
   return `<div class="card">
     <h3 style="margin:0 0 8px;">📋 임대 계약 내역
-      <span class="muted-small" style="font-weight:400;">${withItems.length}건 · 총 ${totalLines}품목</span>
+      <span class="muted-small" style="font-weight:400;">${list.length}품목 · ${assignments.length}대 · 월 ${totalMonthly.toLocaleString()}원 (VAT별도)</span>
     </h3>
-    ${blocks}
+    <div style="overflow-x:auto;">
+      <table class="rc-asset-table" style="font-size:11.5px;">
+        <thead>
+          <tr>
+            <th style="width:4%;">#</th>
+            <th style="width:13%;">품목</th>
+            <th>모델</th>
+            <th class="num" style="width:9%;">기본(흑)</th>
+            <th class="num" style="width:9%;">기본(컬)</th>
+            <th class="num" style="width:9%;">추가(흑)</th>
+            <th class="num" style="width:9%;">추가(컬)</th>
+            <th class="num" style="width:6%;">수량</th>
+            <th class="num" style="width:11%;">월렌탈료</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   </div>`;
 }
 
