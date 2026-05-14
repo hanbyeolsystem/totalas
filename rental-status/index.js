@@ -230,6 +230,39 @@
     $('#stat-util').innerHTML = `${util}<span class="unit">%</span>`;
   }
 
+  // ---------- 거래처 카테고리별 보유 현황 (임대거래처에서 이관) ----------
+  function renderCustCatStats() {
+    // 활성 배정만 사용 — 만기/종료 배정 제외
+    const acts = activeAssignmentsList();
+    // 거래처별 보유 카테고리 set
+    const itemById = new Map(state.items.map(i => [i.id, i]));
+    const custCats = new Map(); // customer_id → Set<category>
+    for (const a of acts) {
+      const it = itemById.get(a.item_id);
+      if (!it) continue;
+      const cat = classifyItem(it, a);
+      if (!custCats.has(a.customer_id)) custCats.set(a.customer_id, new Set());
+      custCats.get(a.customer_id).add(cat);
+    }
+    const activeCust = state.customers.filter(c => c.active !== false && !c.archived_at);
+    const totalAssets = acts.length;
+    const setEl = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = (n || 0).toLocaleString(); };
+    const countCat = (cat) => activeCust.filter(c => custCats.get(c.id)?.has(cat)).length;
+
+    setEl('cs-total', activeCust.length);
+    const subEl = document.getElementById('cs-total-sub');
+    if (subEl) subEl.textContent = `총 자산 ${totalAssets.toLocaleString()}건`;
+    setEl('cs-bw-mfp',      countCat('흑백복사기'));
+    setEl('cs-color-mfp',   countCat('컬러복사기'));
+    setEl('cs-bw-laser',    countCat('흑백레이저'));
+    setEl('cs-color-laser', countCat('컬러레이저'));
+    setEl('cs-inkjet',      countCat('잉크젯'));
+    setEl('cs-pc',          countCat('컴퓨터'));
+    setEl('cs-monitor',     countCat('모니터'));
+    setEl('cs-wellness',    countCat('웰리스'));
+    setEl('cs-nas',         countCat('나스'));
+  }
+
   // ---------- 카테고리 빠른 분포 ----------
   function renderCatRow() {
     const row = $('#rs-cat-row');
@@ -1003,6 +1036,7 @@
   }
   function renderAll() {
     renderTopStats();
+    renderCustCatStats();
     renderCatRow();
     refreshTabCounts();
     populateSelectsOnce();
