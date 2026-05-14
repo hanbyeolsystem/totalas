@@ -621,7 +621,7 @@ function renderDetail() {
   const assetCard = `
     <div class="card">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
-        <h3 style="margin:0;">📦 보유 자산 <span class="muted-small" style="font-weight:400;">${sorted.length}건</span></h3>
+        <h3 style="margin:0;">📦 임대 물품 내역 <span class="muted-small" style="font-weight:400;">${sorted.length}건</span></h3>
         <button class="btn small primary" id="btn-asset-add">+ 자산 추가</button>
       </div>
       ${sorted.length ? `
