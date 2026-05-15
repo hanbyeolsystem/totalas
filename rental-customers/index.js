@@ -1152,22 +1152,20 @@ function openAssetForm(customer, existing) {
           throw asErr;
         }
       }
-      // 신규 자산 추가 시 — 가장 최근 계약서 items 에 자동 반영
-      let ctSyncMsg = '';
-      if (!existing) {
-        try {
-          ctSyncMsg = await syncAssetToLatestContract(customer.id, itemPayload, assignPayload);
-        } catch (syncErr) {
-          console.warn('계약서 동기화 실패:', syncErr.message || syncErr);
-          ctSyncMsg = ' (계약서 동기화 실패)';
-        }
-      }
-
       closeModal();
-      const baseMsg = existing ? '자산이 수정되었습니다.' : '자산이 추가되었습니다.';
-      toast(baseMsg + ctSyncMsg, 'ok');
       await loadAll();
       renderDetail();
+      // 자산 추가/수정 후 — 가장 최근 계약서 items 를 활성 자산 기준으로 재동기화
+      let ctSyncMsg = '';
+      try {
+        ctSyncMsg = await rebuildLatestContractItems(customer.id);
+        if (ctSyncMsg) renderDetail();   // 계약서 카드도 새 items 로 다시 그림
+      } catch (syncErr) {
+        console.warn('계약서 동기화 실패:', syncErr.message || syncErr);
+        ctSyncMsg = ' (계약서 동기화 실패)';
+      }
+      const baseMsg = existing ? '자산이 수정되었습니다.' : '자산이 추가되었습니다.';
+      toast(baseMsg + ctSyncMsg, 'ok');
     } catch (err) {
       console.error(err);
       errEl.textContent = err.message || String(err);
@@ -1179,32 +1177,47 @@ function openAssetForm(customer, existing) {
   document.getElementById('rc-modal').classList.add('show');
 }
 
-// 신규 자산 → 가장 최근 계약서 items 에 추가 (added_date 기록)
-async function syncAssetToLatestContract(customerId, itemPayload, assignPayload) {
+// ─────────────────────────────────────────────────────────────
+// 가장 최근 계약서의 items 배열을 거래처의 현재 활성 자산으로 재계산
+//   - 자산 추가/수정/삭제 후 호출
+//   - c._assignments 기준으로 그룹핑(품목·모델·단가·월렌탈료·시작일) 후 update
+//   - 호출 전 loadAll() 이 선행되어야 STATE.customers 가 최신
+// ─────────────────────────────────────────────────────────────
+async function rebuildLatestContractItems(customerId) {
   const supa = window.totalasAuth;
   if (!supa) return '';
   const list = await loadContractsFor(customerId);
   if (!list || !list.length) return '';
   const latest = list[0];
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const modelLabel = [itemPayload.brand, itemPayload.model].filter(Boolean).join(' ').trim();
-  const noteParts = [];
-  if (itemPayload.serial) noteParts.push(`S/N ${itemPayload.serial}`);
-  if (itemPayload.subtype) noteParts.push(itemPayload.subtype);
-  const newRow = {
-    model: modelLabel || itemPayload.model || '',
-    bw_free: Number(assignPayload.bw_free) || 0,
-    co_free: Number(assignPayload.co_free) || 0,
-    bw_rate: Number(assignPayload.bw_rate) || 0,
-    co_rate: Number(assignPayload.co_rate) || 0,
-    qty: 1,
-    monthly_fee: Number(assignPayload.monthly_fee) || 0,
-    note: noteParts.join(' · '),
-    added_date: todayStr,
-  };
-  const items = Array.isArray(latest.items) ? latest.items.slice() : [];
-  items.push(newRow);
+
+  const cust = STATE.customers.find(c => c.id === customerId);
+  const assignments = (cust && cust._assignments) || [];
+
+  // 그룹핑 — renderContractItemsCard 와 동일한 키 (시작일 포함)
+  const groups = new Map();
+  for (const a of assignments) {
+    const it = a.rental_items || {};
+    const subtype     = it.subtype || '';
+    const model       = ((it.brand || '') + ' ' + (it.model || '')).trim();
+    const bw_free     = Number(a.bw_free)  || 0;
+    const co_free     = Number(a.co_free)  || 0;
+    const bw_rate     = Number(a.bw_rate)  || 0;
+    const co_rate     = Number(a.co_rate)  || 0;
+    const monthly_fee = Number(a.monthly_fee) || 0;
+    const start_date  = (a.start_date || it.install_date || '').slice(0, 10);
+    const key = [subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee, start_date].join('|');
+    if (!groups.has(key)) {
+      groups.set(key, { subtype, model, bw_free, co_free, bw_rate, co_rate, qty: 0, monthly_fee, note: '', added_date: start_date });
+    }
+    groups.get(key).qty++;
+  }
+  // 시작일 내림차순 → 품목 → 모델
+  const items = [...groups.values()].sort((a, b) =>
+    (b.added_date || '').localeCompare(a.added_date || '') ||
+    (a.subtype    || '').localeCompare(b.subtype    || '', 'ko') ||
+    (a.model      || '').localeCompare(b.model      || '', 'ko')
+  );
+
   const { error } = await supa
     .from('rental_contracts')
     .update({ items, updated_at: new Date().toISOString() })
@@ -1213,7 +1226,7 @@ async function syncAssetToLatestContract(customerId, itemPayload, assignPayload)
   // 캐시 갱신
   latest.items = items;
   CT_STATE.byCustomer[customerId] = list;
-  return ` · 계약서 ${latest.contract_no || latest.id}에 추가됨 (재출력·재서명 필요)`;
+  return ` · 계약서 ${latest.contract_no || latest.id} 동기화됨 (${items.length}품목/${assignments.length}대)`;
 }
 
 async function deleteAsset(customer, assignment) {
@@ -1237,9 +1250,18 @@ async function deleteAsset(customer, assignment) {
       // item 삭제 실패는 무시하지 않되 토스트만 — assignment는 이미 삭제됨
       if (iErr) console.warn('item 삭제 경고:', iErr.message);
     }
-    toast('자산이 삭제되었습니다.', 'ok');
     await loadAll();
     renderDetail();
+    // 자산 삭제 후 — 가장 최근 계약서 items 를 재동기화 (해당 row 가 빠짐)
+    let ctSyncMsg = '';
+    try {
+      ctSyncMsg = await rebuildLatestContractItems(customer.id);
+      if (ctSyncMsg) renderDetail();
+    } catch (syncErr) {
+      console.warn('계약서 동기화 실패:', syncErr.message || syncErr);
+      ctSyncMsg = ' (계약서 동기화 실패)';
+    }
+    toast('자산이 삭제되었습니다.' + ctSyncMsg, 'ok');
   } catch (err) {
     console.error(err);
     toast('삭제 실패: ' + (err.message || err), 'err');
