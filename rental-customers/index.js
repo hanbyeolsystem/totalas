@@ -1552,37 +1552,14 @@ function renderContractItemsCard(customer) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 카운터 12개월 카드 — 거래처의 활성 자산 카운터를 월별로 집계
+// 카운터 12개월 카드 — 거래처의 활성 자산 카운터를 월별로 집계 (가로 레이아웃)
 //   - 데이터 소스: STATE.countersByItem (rental_counters 테이블)
 //   - 범위: 이번 달 기준 최근 12개월 (데이터 없는 달은 0)
-//   - 합계: 흑백 / 컬러 / 합계 3개 표시
+//   - 레이아웃: 월이 열 헤더 (YY/MM), 행은 흑백/컬러 2줄 + 합계 열
 // ─────────────────────────────────────────────────────────────
 function renderCounters12mCard(customer) {
   const assignments = customer._assignments || [];
   const itemIds = assignments.map(a => a.item_id).filter(Boolean);
-
-  // 최근 12개월 ym 목록 (오래된 순)
-  const now = new Date();
-  const months = [];
-  for (let i = 11; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
-  }
-
-  // 월별 집계
-  const monthData = new Map(months.map(m => [m, { bw: 0, color: 0 }]));
-  let dataPoints = 0;
-  for (const itemId of itemIds) {
-    const counters = (STATE.countersByItem && STATE.countersByItem[itemId]) || [];
-    for (const c of counters) {
-      if (monthData.has(c.ym)) {
-        const d = monthData.get(c.ym);
-        d.bw    += Number(c.bw)    || 0;
-        d.color += Number(c.color) || 0;
-        dataPoints++;
-      }
-    }
-  }
 
   if (!itemIds.length) {
     return `<div class="card">
@@ -1591,22 +1568,38 @@ function renderCounters12mCard(customer) {
     </div>`;
   }
 
-  let totalBw = 0, totalColor = 0;
-  const rows = months.map(m => {
-    const d = monthData.get(m);
-    totalBw    += d.bw;
-    totalColor += d.color;
-    const sum = d.bw + d.color;
-    const isEmpty = (d.bw === 0 && d.color === 0);
-    return `<tr ${isEmpty ? 'style="color:#94a3b8;"' : ''}>
-      <td>${m}</td>
-      <td class="num">${d.bw.toLocaleString()}</td>
-      <td class="num">${d.color.toLocaleString()}</td>
-      <td class="num"><strong>${sum.toLocaleString()}</strong></td>
-    </tr>`;
-  }).join('');
+  // 최근 12개월 ym 목록 (오래된 → 최신)
+  const now = new Date();
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ym  = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const lbl = `${String(d.getFullYear()).slice(2)}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+    months.push({ ym, lbl, bw: 0, color: 0 });
+  }
+  const idx = new Map(months.map((m, i) => [m.ym, i]));
 
+  let dataPoints = 0;
+  for (const itemId of itemIds) {
+    const counters = (STATE.countersByItem && STATE.countersByItem[itemId]) || [];
+    for (const c of counters) {
+      if (idx.has(c.ym)) {
+        const m = months[idx.get(c.ym)];
+        m.bw    += Number(c.bw)    || 0;
+        m.color += Number(c.color) || 0;
+        dataPoints++;
+      }
+    }
+  }
+
+  const totalBw    = months.reduce((s, m) => s + m.bw,    0);
+  const totalColor = months.reduce((s, m) => s + m.color, 0);
   const grandTotal = totalBw + totalColor;
+
+  const headCells = months.map(m => `<th class="num">${m.lbl}</th>`).join('');
+  const bwCells   = months.map(m => `<td class="num"${m.bw    === 0 ? ' style="color:#cbd5e1;"' : ''}>${m.bw.toLocaleString()}</td>`).join('');
+  const coCells   = months.map(m => `<td class="num"${m.color === 0 ? ' style="color:#cbd5e1;"' : ''}>${m.color.toLocaleString()}</td>`).join('');
+
   const emptyNote = dataPoints === 0
     ? '<p class="muted" style="margin:8px 0 0; font-size:11.5px;">⚠ 이 거래처 자산에 카운터 데이터가 없습니다.</p>'
     : '';
@@ -1618,24 +1611,26 @@ function renderCounters12mCard(customer) {
       </span>
     </h3>
     <div style="overflow-x:auto;">
-      <table class="rc-asset-table" style="font-size:11.5px;">
+      <table class="rc-asset-table" style="font-size:11.5px; white-space:nowrap;">
         <thead>
           <tr>
-            <th style="width:18%;">월 (YYYY-MM)</th>
-            <th class="num" style="width:26%;">흑백</th>
-            <th class="num" style="width:26%;">컬러</th>
-            <th class="num" style="width:30%;">합계</th>
+            <th style="text-align:left;">흑백 / 컬러</th>
+            ${headCells}
+            <th class="num" style="background:#eef2ff;">합계</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
-        <tfoot>
-          <tr style="background:#f1f5f9; font-weight:700;">
-            <td>합계</td>
-            <td class="num">${totalBw.toLocaleString()}</td>
-            <td class="num">${totalColor.toLocaleString()}</td>
-            <td class="num">${grandTotal.toLocaleString()}</td>
+        <tbody>
+          <tr>
+            <td style="font-weight:600;">흑백</td>
+            ${bwCells}
+            <td class="num" style="background:#f1f5f9;"><strong>${totalBw.toLocaleString()}</strong></td>
           </tr>
-        </tfoot>
+          <tr>
+            <td style="font-weight:600;">컬러</td>
+            ${coCells}
+            <td class="num" style="background:#f1f5f9;"><strong>${totalColor.toLocaleString()}</strong></td>
+          </tr>
+        </tbody>
       </table>
     </div>
     ${emptyNote}
