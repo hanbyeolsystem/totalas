@@ -659,17 +659,17 @@ $('#up-submit').addEventListener('click', async () => {
 
   setStatus('#up-status', '업로드 중...');
   const ts   = Date.now();
-  const safe = file.name.replace(/[^\w가-힣.\-]+/g, '_');
-  const customerSafe = customer.replace(/[^\w가-힣.\-]+/g, '_');
-  const path = `${customerSafe}/${ts}_${safe}`;
+  const rand = Math.random().toString(36).slice(2, 10);
   const ext  = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+  const rc   = STATE.rental_names.find(r => r.name === customer);
+  const folder = rc ? rc.id : '_misc';
+  const path = `${folder}/${ts}_${rand}${ext ? '.' + ext : ''}`;
 
   const up = await sb().storage.from('archives').upload(path, file, {
     cacheControl: '3600', upsert: false, contentType: file.type || undefined,
   });
   if (up.error) return setStatus('#up-status', 'Storage 실패: ' + up.error.message, 'err');
 
-  const rc = STATE.rental_names.find(r => r.name === customer);
   const ins = await sb().from('customer_archives').insert({
     customer_name: customer,
     rental_customer_id: rc ? rc.id : null,
