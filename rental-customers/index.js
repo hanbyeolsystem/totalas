@@ -1068,7 +1068,12 @@ function openAssetForm(customer, existing) {
     f.co_rate.value = existing.co_rate != null ? existing.co_rate : '';
     f.start_date.value = (existing.start_date || '').slice(0, 10);
   } else {
+    // 신규 자산 추가: 도입일/임대 시작일 기본값을 오늘로 자동 채움
+    // (이전 자산과 구분되도록 추가 시점이 명확히 기록되게)
+    const todayStr = new Date().toISOString().slice(0, 10);
     f.status.value = 'active';
+    f.install_date.value = todayStr;
+    f.start_date.value   = todayStr;
   }
   applyAssetVisibility(f);
 
@@ -1464,16 +1469,19 @@ function renderContractItemsCard(customer) {
     const bw_rate     = Number(a.bw_rate)  || 0;
     const co_rate     = Number(a.co_rate)  || 0;
     const monthly_fee = Number(a.monthly_fee) || 0;
-    const key = [subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee].join('');
+    const start_date  = (a.start_date || it.install_date || '').slice(0, 10);
+    const key = [subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee, start_date].join('|');
     if (!groups.has(key)) {
-      groups.set(key, { subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee, qty: 0 });
+      groups.set(key, { subtype, model, bw_free, co_free, bw_rate, co_rate, monthly_fee, start_date, qty: 0 });
     }
     groups.get(key).qty++;
   }
 
+  // 시작일 내림차순(최신 추가가 위로) → 품목 → 모델
   const list = [...groups.values()].sort((a, b) =>
-    (a.subtype || '').localeCompare(b.subtype || '', 'ko') ||
-    (a.model   || '').localeCompare(b.model   || '', 'ko')
+    (b.start_date || '').localeCompare(a.start_date || '') ||
+    (a.subtype    || '').localeCompare(b.subtype    || '', 'ko') ||
+    (a.model      || '').localeCompare(b.model      || '', 'ko')
   );
 
   const totalMonthly = list.reduce((s, g) => s + (g.monthly_fee * g.qty), 0);
@@ -1481,6 +1489,7 @@ function renderContractItemsCard(customer) {
   const rows = list.map((g, i) => `
     <tr>
       <td>${i + 1}</td>
+      <td class="muted-small">${escapeHtml(g.start_date || '–')}</td>
       <td>${escapeHtml(g.subtype || '–')}</td>
       <td>${escapeHtml(g.model   || '–')}</td>
       <td class="num">${g.bw_free.toLocaleString()}</td>
@@ -1500,14 +1509,15 @@ function renderContractItemsCard(customer) {
         <thead>
           <tr>
             <th style="width:4%;">#</th>
-            <th style="width:13%;">품목</th>
+            <th style="width:9%;">시작일</th>
+            <th style="width:12%;">품목</th>
             <th>모델</th>
-            <th class="num" style="width:9%;">기본(흑)</th>
-            <th class="num" style="width:9%;">기본(컬)</th>
-            <th class="num" style="width:9%;">추가(흑)</th>
-            <th class="num" style="width:9%;">추가(컬)</th>
+            <th class="num" style="width:8%;">기본(흑)</th>
+            <th class="num" style="width:8%;">기본(컬)</th>
+            <th class="num" style="width:8%;">추가(흑)</th>
+            <th class="num" style="width:8%;">추가(컬)</th>
             <th class="num" style="width:6%;">수량</th>
-            <th class="num" style="width:11%;">월렌탈료</th>
+            <th class="num" style="width:10%;">월렌탈료</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
