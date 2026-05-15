@@ -1552,9 +1552,10 @@ function renderContractItemsCard(customer) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 카운터 12개월 카드 — 거래처의 활성 자산 카운터를 월별로 집계 (가로 레이아웃)
-//   - 데이터 소스: STATE.countersByItem (rental_counters 테이블)
-//   - 범위: 이번 달 기준 최근 12개월 (데이터 없는 달은 0)
+// 카운터 12개월 카드 — 거래처 자산의 "월별 사용량" (가로 레이아웃)
+//   - 데이터 소스: STATE.countersByItem (rental_counters; 누적 odometer 값)
+//   - 월별 사용량 = 이번 달 누적 - 직전 달 누적 (음수면 자산 교체로 간주 → 0)
+//   - 범위: 이번 달 기준 최근 12개월
 //   - 레이아웃: 월이 열 헤더 (YY/MM), 행은 흑백/컬러 2줄 + 합계 열
 // ─────────────────────────────────────────────────────────────
 function renderCounters12mCard(customer) {
@@ -1563,7 +1564,7 @@ function renderCounters12mCard(customer) {
 
   if (!itemIds.length) {
     return `<div class="card">
-      <h3 style="margin:0 0 8px;">📊 카운터 — 최근 12개월</h3>
+      <h3 style="margin:0 0 8px;">📊 카운터 — 최근 12개월 (월별 사용량)</h3>
       <p class="muted" style="margin:0; font-size:12.5px;">등록된 자산이 없어 카운터를 표시할 수 없습니다.</p>
     </div>`;
   }
@@ -1582,13 +1583,20 @@ function renderCounters12mCard(customer) {
   let dataPoints = 0;
   for (const itemId of itemIds) {
     const counters = (STATE.countersByItem && STATE.countersByItem[itemId]) || [];
-    for (const c of counters) {
-      if (idx.has(c.ym)) {
-        const m = months[idx.get(c.ym)];
-        m.bw    += Number(c.bw)    || 0;
-        m.color += Number(c.color) || 0;
-        dataPoints++;
-      }
+    // 시간순(ym 오름차순) 정렬 — 직전 달과 차감용
+    const sorted = counters.slice().sort((a, b) => (a.ym || '').localeCompare(b.ym || ''));
+    for (let i = 0; i < sorted.length; i++) {
+      const cur = sorted[i];
+      if (!idx.has(cur.ym)) continue;                  // 12개월 윈도우 밖이면 합산 X
+      const prev = i > 0 ? sorted[i - 1] : null;       // 직전 달 — 윈도우 밖이어도 사용 가능
+      // 첫 데이터 달은 delta 계산 불가 → 0 처리
+      // 음수(자산 교체/리셋)도 0 처리
+      const dbw    = prev ? Math.max(0, (Number(cur.bw)    || 0) - (Number(prev.bw)    || 0)) : 0;
+      const dcolor = prev ? Math.max(0, (Number(cur.color) || 0) - (Number(prev.color) || 0)) : 0;
+      const m = months[idx.get(cur.ym)];
+      m.bw    += dbw;
+      m.color += dcolor;
+      if (prev) dataPoints++;
     }
   }
 
@@ -1605,8 +1613,8 @@ function renderCounters12mCard(customer) {
     : '';
 
   return `<div class="card">
-    <h3 style="margin:0 0 8px;">📊 카운터 — 최근 12개월
-      <span class="muted-small" style="font-weight:400;">
+    <h3 style="margin:0 0 8px;">📊 카운터 — 최근 12개월 <span class="muted-small" style="font-weight:400;">(월별 사용량 · 누적 차감)</span>
+      <span class="muted-small" style="font-weight:400; margin-left:8px;">
         흑백 ${totalBw.toLocaleString()} · 컬러 ${totalColor.toLocaleString()} · 합계 ${grandTotal.toLocaleString()}
       </span>
     </h3>
