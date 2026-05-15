@@ -68,6 +68,7 @@
 
 <script>
 const ASMS_HOME_URL = 'https://hanbyeolsystem.github.io/asms-web/';
+const SESSION_V = String(Date.now());
 const iframe   = document.getElementById('asms-iframe');
 const title    = document.getElementById('frame-title');
 const openNew  = document.getElementById('btn-open-new');
@@ -107,9 +108,10 @@ function bindSidebarLinks() {
       if (href === 'asms.html') {
         target = ASMS_HOME_URL;
       } else {
-        // 같은 사이트의 페이지 — embed=1 파라미터 추가
+        // 같은 사이트의 페이지 — embed=1 + 세션 캐시버스터
         const u = new URL(href, location.href);
         u.searchParams.set('embed', '1');
+        u.searchParams.set('v', SESSION_V);
         target = u.toString();
       }
       iframe.src = target;
