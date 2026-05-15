@@ -778,12 +778,15 @@ function renderDetail() {
   // 3-2) 임대 계약 내역 카드 — 임대계약서에 입력한 임대 물품 표시 (계약별 그룹)
   const contractItemsCard = renderContractItemsCard(c);
 
+  // 3-3) 카운터 12개월 카드 — 거래처 자산의 최근 1년치 흑백/컬러 카운터
+  const counters12mCard = renderCounters12mCard(c);
+
   // 4) 수리내역(지출) + 판매/수리(수익) 카드 — hook 에서 데이터 로드 후 채워짐
   const expenseCard = renderRepairCard(c, 'expense');
   const incomeCard  = renderRepairCard(c, 'income');
 
-  // 순서: 보유자산 → 임대 계약 내역 → 수리내역(지출) → 판매/수리(수익) → 기본정보 → (hook 으로 계약서) → Cross-sell
-  detail.innerHTML = assetCard + contractItemsCard + expenseCard + incomeCard + infoCard + insightCard;
+  // 순서: 보유자산 → 임대 계약 내역 → 카운터 12개월 → 수리(지출/수익) → 기본정보 → 계약서 → Cross-sell
+  detail.innerHTML = assetCard + contractItemsCard + counters12mCard + expenseCard + incomeCard + infoCard + insightCard;
 
   document.getElementById('btn-edit').addEventListener('click', () => openForm(c));
   document.getElementById('btn-delete').addEventListener('click', () => deleteCustomer(c));
@@ -1545,6 +1548,97 @@ function renderContractItemsCard(customer) {
         <tbody>${rows}</tbody>
       </table>
     </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 카운터 12개월 카드 — 거래처의 활성 자산 카운터를 월별로 집계
+//   - 데이터 소스: STATE.countersByItem (rental_counters 테이블)
+//   - 범위: 이번 달 기준 최근 12개월 (데이터 없는 달은 0)
+//   - 합계: 흑백 / 컬러 / 합계 3개 표시
+// ─────────────────────────────────────────────────────────────
+function renderCounters12mCard(customer) {
+  const assignments = customer._assignments || [];
+  const itemIds = assignments.map(a => a.item_id).filter(Boolean);
+
+  // 최근 12개월 ym 목록 (오래된 순)
+  const now = new Date();
+  const months = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  // 월별 집계
+  const monthData = new Map(months.map(m => [m, { bw: 0, color: 0 }]));
+  let dataPoints = 0;
+  for (const itemId of itemIds) {
+    const counters = (STATE.countersByItem && STATE.countersByItem[itemId]) || [];
+    for (const c of counters) {
+      if (monthData.has(c.ym)) {
+        const d = monthData.get(c.ym);
+        d.bw    += Number(c.bw)    || 0;
+        d.color += Number(c.color) || 0;
+        dataPoints++;
+      }
+    }
+  }
+
+  if (!itemIds.length) {
+    return `<div class="card">
+      <h3 style="margin:0 0 8px;">📊 카운터 — 최근 12개월</h3>
+      <p class="muted" style="margin:0; font-size:12.5px;">등록된 자산이 없어 카운터를 표시할 수 없습니다.</p>
+    </div>`;
+  }
+
+  let totalBw = 0, totalColor = 0;
+  const rows = months.map(m => {
+    const d = monthData.get(m);
+    totalBw    += d.bw;
+    totalColor += d.color;
+    const sum = d.bw + d.color;
+    const isEmpty = (d.bw === 0 && d.color === 0);
+    return `<tr ${isEmpty ? 'style="color:#94a3b8;"' : ''}>
+      <td>${m}</td>
+      <td class="num">${d.bw.toLocaleString()}</td>
+      <td class="num">${d.color.toLocaleString()}</td>
+      <td class="num"><strong>${sum.toLocaleString()}</strong></td>
+    </tr>`;
+  }).join('');
+
+  const grandTotal = totalBw + totalColor;
+  const emptyNote = dataPoints === 0
+    ? '<p class="muted" style="margin:8px 0 0; font-size:11.5px;">⚠ 이 거래처 자산에 카운터 데이터가 없습니다.</p>'
+    : '';
+
+  return `<div class="card">
+    <h3 style="margin:0 0 8px;">📊 카운터 — 최근 12개월
+      <span class="muted-small" style="font-weight:400;">
+        흑백 ${totalBw.toLocaleString()} · 컬러 ${totalColor.toLocaleString()} · 합계 ${grandTotal.toLocaleString()}
+      </span>
+    </h3>
+    <div style="overflow-x:auto;">
+      <table class="rc-asset-table" style="font-size:11.5px;">
+        <thead>
+          <tr>
+            <th style="width:18%;">월 (YYYY-MM)</th>
+            <th class="num" style="width:26%;">흑백</th>
+            <th class="num" style="width:26%;">컬러</th>
+            <th class="num" style="width:30%;">합계</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr style="background:#f1f5f9; font-weight:700;">
+            <td>합계</td>
+            <td class="num">${totalBw.toLocaleString()}</td>
+            <td class="num">${totalColor.toLocaleString()}</td>
+            <td class="num">${grandTotal.toLocaleString()}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    ${emptyNote}
   </div>`;
 }
 
