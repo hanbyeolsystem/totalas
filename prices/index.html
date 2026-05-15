@@ -399,9 +399,9 @@ document.getElementById('add-submit').addEventListener('click', async () => {
 
   const sb = window.totalasAuth;
   const ts = Date.now();
-  const safeName = file.name.replace(/[^\w가-힣.\-]+/g, '_');
-  const path = `${ts}_${safeName}`;
+  const rand = Math.random().toString(36).slice(2, 10);
   const ext  = (file.name.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+  const path = `${ts}_${rand}${ext ? '.' + ext : ''}`;
 
   // 1) Storage 업로드
   const up = await sb.storage.from('prices').upload(path, file, {
