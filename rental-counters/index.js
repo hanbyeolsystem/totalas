@@ -24,14 +24,15 @@ const supa = window.totalasAuth || (window.supabase && window.TOTALAS
 
 const state = {
   ym: ymOfNow(),
-  customerId: '',
-  category: '',
+  customerQuery: '',
   onlyMissing: false,
   items: [],            // 자산 + 배정 + 거래처
   curMap: {},           // item_id → 이번달 row
   prevMap: {},          // item_id → 이전월 row
   histMap: {},          // item_id → [ {ym, bw, color, uptime_hours} ... ]  (최근 6개월)
   suppliesMap: {},      // item_id → 최근 supplies row
+  itemsEverCounted: new Set(),     // 과거 어느 달이든 카운터 1건 이상 입력된 item_id
+  customersEverCounted: new Set(), // 과거 어느 달이든 카운터 입력된 customer_id
   customers: [],
   customerCombined: {}, // cid → boolean (합산 청구 여부 캐시)
   customerPeriod: {},   // cid → 1/3/6/12 (청구 주기 개월)
@@ -39,6 +40,11 @@ const state = {
   activeDrilldown: null,
   // 거래처별 자산 수 (1대만 가진 거래처는 합산 토글 숨김용)
   itemsPerCustomer: {},
+  // 거래처 인라인 확장 (지난 자료 펼침)
+  expandedCustomerId: null,
+  expansionMonths: 6,                  // 3 / 6 / 12 (sticky)
+  expansionRows: null,                 // Map: `${item_id}|${ym}` → {bw, color, uptime_hours}
+  expansionLoading: false,
 };
 
 // auth.js 의 bootstrap() 이 완료되어 window.currentUser 가 채워질 때까지 대기
@@ -65,8 +71,10 @@ async function init() {
     updateYearHeader();
     reload();
   });
-  document.getElementById('f-customer').addEventListener('change', e => { state.customerId = e.target.value; render(); });
-  document.getElementById('f-category').addEventListener('change', e => { state.category = e.target.value; render(); });
+  document.getElementById('f-customer-search').addEventListener('input', e => {
+    state.customerQuery = e.target.value || '';
+    render();
+  });
   document.getElementById('f-only-missing').addEventListener('change', e => { state.onlyMissing = e.target.checked; render(); });
   document.getElementById('btn-refresh').addEventListener('click', reload);
 
@@ -88,7 +96,7 @@ async function reload() {
   setBodyLoading();
   try {
     await Promise.all([loadCustomers(), loadItems(), loadCounters(), loadSupplies()]);
-    fillCustomerFilter();
+    deriveCustomersEverCounted();
     render();
     updateExcelTargetYm();
     rematchExcelRows();
@@ -156,23 +164,32 @@ async function loadItems() {
 async function loadCounters() {
   // 이번달 + 이전 6개월 한 번에 가져와서 클라이언트에서 그룹핑
   const monthsBack = listMonthsBack(state.ym, 7); // 이번달 + 6개월 전까지
-  const { data, error } = await supa.from('rental_counters')
-    .select('item_id, ym, bw, color, uptime_hours, read_at, source')
-    .in('ym', monthsBack);
-  if (error) throw error;
+  // "과거 어느 달이든 카운터 입력된" 집합은 ym 필터 없이 별도 조회
+  const [detailRes, everRes] = await Promise.all([
+    supa.from('rental_counters')
+      .select('item_id, ym, bw, color, uptime_hours, read_at, source')
+      .in('ym', monthsBack),
+    supa.from('rental_counters')
+      .select('item_id')
+      .range(0, 99999),
+  ]);
+  if (detailRes.error) throw detailRes.error;
+  if (everRes.error) throw everRes.error;
 
   const prevYm = listMonthsBack(state.ym, 2)[1]; // 직전월
   state.curMap = {};
   state.prevMap = {};
   state.histMap = {};
 
-  for (const r of (data || [])) {
+  for (const r of (detailRes.data || [])) {
     if (r.ym === state.ym) state.curMap[r.item_id] = r;
     else if (r.ym === prevYm) state.prevMap[r.item_id] = r;
     if (r.ym !== state.ym) {
       (state.histMap[r.item_id] ||= []).push(r);
     }
   }
+
+  state.itemsEverCounted = new Set((everRes.data || []).map(r => r.item_id));
 }
 
 async function loadSupplies() {
@@ -193,22 +210,20 @@ async function loadSupplies() {
   state.suppliesMap = map;
 }
 
-function fillCustomerFilter() {
-  const sel = document.getElementById('f-customer');
-  const cur = state.customerId;
-  // 자산에 실제 배정된 거래처만
-  const inUse = new Set(state.items.map(i => i.customer_id).filter(Boolean));
-  const list = state.customers.filter(c => inUse.has(c.id));
-  sel.innerHTML = '<option value="">전체</option>' +
-    list.map(c => `<option value="${escapeAttr(c.id)}">${escapeHtml(c.company)}</option>`).join('');
-  if (cur) sel.value = cur;
+function deriveCustomersEverCounted() {
+  const ever = new Set();
+  for (const it of state.items) {
+    if (it.customer_id && state.itemsEverCounted.has(it.id)) ever.add(it.customer_id);
+  }
+  state.customersEverCounted = ever;
 }
 
 function render() {
   const tbody = document.getElementById('grid-body');
+  const q = normalize(state.customerQuery || '');
   let rows = state.items
-    .filter(it => !state.customerId || it.customer_id === state.customerId)
-    .filter(it => !state.category || (it.category === state.category))
+    .filter(it => it.customer_id && state.customersEverCounted.has(it.customer_id))
+    .filter(it => !q || normalize(it.customer_name || '').includes(q))
     .map(it => buildRow(it))
     .filter(r => !state.onlyMissing || r.missing);
 
@@ -281,7 +296,21 @@ function render() {
     return;
   }
 
-  tbody.innerHTML = rows.map(r => renderRow(r)).join('');
+  // 거래처별 그룹 끝마다 확장 영역 삽입
+  let html = '';
+  let lastCid = null;
+  for (const r of rows) {
+    const cid = r.item.customer_id;
+    if (lastCid !== null && cid !== lastCid && state.expandedCustomerId === lastCid) {
+      html += renderExpansion(lastCid);
+    }
+    html += renderRow(r);
+    lastCid = cid;
+  }
+  if (lastCid !== null && state.expandedCustomerId === lastCid) {
+    html += renderExpansion(lastCid);
+  }
+  tbody.innerHTML = html;
   attachCellHandlers();
 }
 
@@ -409,8 +438,10 @@ function renderRow(r) {
   const optsHTML = (combineHTML || periodHTML)
     ? `<div class="bill-options">${combineHTML}${periodHTML}</div>`
     : '';
+  const expandedCls = (cid && state.expandedCustomerId === cid) ? ' expanded' : '';
+  const expandedIcon = (cid && state.expandedCustomerId === cid) ? '📂' : '📅';
   const customerLine = r._isCustomerFirst
-    ? `<div style="font-weight:600;">${escapeHtml(it.customer_name)}</div>${optsHTML}`
+    ? `<div style="font-weight:600;"><span class="customer-name-link${expandedCls}" data-cid="${escapeAttr(cid || '')}" role="button" tabindex="0" title="지난 자료 펼치기/접기">${escapeHtml(it.customer_name)}<span class="icon">${expandedIcon}</span></span></div>${optsHTML}`
     : `<div class="muted-small" style="color:#94a3b8;">↳ ${escapeHtml(it.customer_name)}</div>`;
 
   // 출력기기가 아니면 흑백/컬러 셀 모두 N/A 처리
@@ -487,6 +518,26 @@ function attachCellHandlers() {
     sel.addEventListener('change', onPeriodChange);
     sel.addEventListener('click', e => e.stopPropagation());
   });
+  // 거래처명 클릭 → 인라인 확장 토글 (지난 자료 펼침/접기)
+  document.querySelectorAll('.customer-name-link').forEach(el => {
+    const handle = (e) => {
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      toggleCustomerExpansion(el.dataset.cid);
+    };
+    el.addEventListener('click', handle);
+    el.addEventListener('keydown', handle);
+  });
+  // 확장 영역: 기간 탭 (3/6/12개월)
+  document.querySelectorAll('tr.expansion-header .ch-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = Number(btn.dataset.months) || 6;
+      changeExpansionMonths(m);
+    });
+  });
+  // 확장 영역: 접기 버튼
+  const collapseBtn = document.getElementById('btn-collapse-expansion');
+  if (collapseBtn) collapseBtn.addEventListener('click', collapseCustomerExpansion);
 }
 
 async function onPeriodChange(e) {
@@ -573,6 +624,8 @@ async function onCellChange(e) {
       .upsert(payload, { onConflict: 'item_id,ym' });
     if (error) throw error;
     state.curMap[itemId] = payload;
+    state.itemsEverCounted.add(itemId);
+    deriveCustomersEverCounted();
     inp.classList.add('saved');
     setTimeout(() => inp.classList.remove('saved'), 900);
     // 통계 즉시 갱신
@@ -654,14 +707,182 @@ function renderDrilldown(key) {
   body.querySelectorAll('.drilldown-row').forEach(tr => {
     tr.addEventListener('click', () => {
       const cid = tr.dataset.cid;
-      const sel = document.getElementById('f-customer');
-      if (sel) sel.value = cid;
-      state.customerId = cid;
+      const cust = state.customers.find(c => c.id === cid);
+      const name = cust?.company || '';
+      const inp = document.getElementById('f-customer-search');
+      if (inp) inp.value = name;
+      state.customerQuery = name;
       render();
       const card = document.querySelector('.counters-card');
       if (card) window.scrollTo({ top: card.offsetTop - 20, behavior: 'smooth' });
     });
   });
+}
+
+// ===========================================================
+// 거래처 인라인 확장 — 지난 자료 (3 / 6 / 12개월)
+// 거래처명 클릭 시 해당 거래처 행 그룹 바로 아래에
+// 동일한 16개 컬럼(전월/당월/기본매수/월카운터/추가카운터/단가/추가요금 × 흑백/컬러)
+// 으로 과거 N개월치 행을 펼친다.
+// ===========================================================
+async function toggleCustomerExpansion(cid) {
+  if (!cid) return;
+  if (state.expandedCustomerId === cid) {
+    collapseCustomerExpansion();
+    return;
+  }
+  state.expandedCustomerId = cid;
+  state.expansionLoading = true;
+  state.expansionRows = null;
+  render();
+  await loadExpansionData(cid, state.expansionMonths);
+  // 사용자가 로딩 중 다른 거래처를 클릭한 경우 무시
+  if (state.expandedCustomerId !== cid) return;
+  render();
+}
+
+function collapseCustomerExpansion() {
+  state.expandedCustomerId = null;
+  state.expansionRows = null;
+  state.expansionLoading = false;
+  render();
+}
+
+async function changeExpansionMonths(months) {
+  const m = [3, 6, 12].includes(months) ? months : 6;
+  if (m === state.expansionMonths && state.expansionRows) return;
+  state.expansionMonths = m;
+  if (!state.expandedCustomerId) return;
+  state.expansionLoading = true;
+  render();
+  await loadExpansionData(state.expandedCustomerId, m);
+  render();
+}
+
+async function loadExpansionData(cid, months) {
+  const myItems = state.items.filter(it => it.customer_id === cid);
+  if (!myItems.length) {
+    state.expansionRows = new Map();
+    state.expansionLoading = false;
+    return;
+  }
+  // 가장 오래된 표시 월의 "전월" 까지 포함하려면 months+2 개월 필요
+  const ymList = listMonthsBack(state.ym, months + 2);
+  try {
+    const { data, error } = await supa.from('rental_counters')
+      .select('item_id, ym, bw, color, uptime_hours')
+      .in('item_id', myItems.map(i => i.id))
+      .in('ym', ymList);
+    if (error) throw error;
+    const m = new Map();
+    for (const r of (data || [])) m.set(`${r.item_id}|${r.ym}`, r);
+    state.expansionRows = m;
+  } catch (err) {
+    console.error(err);
+    toast('이력 로드 실패: ' + (err.message || err), true);
+    state.expansionRows = new Map();
+  } finally {
+    state.expansionLoading = false;
+  }
+}
+
+function renderExpansion(cid) {
+  const months = state.expansionMonths;
+  const periodHtml = [3, 6, 12].map(m =>
+    `<button class="ch-tab${m === months ? ' active' : ''}" data-months="${m}" type="button">${m}개월</button>`
+  ).join('');
+
+  const headerRow = `
+    <tr class="expansion-header">
+      <td colspan="16">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <strong style="font-size:13px;">📂 지난 자료</strong>
+            <div style="display:flex; gap:4px;">${periodHtml}</div>
+          </div>
+          <button class="btn ghost small" id="btn-collapse-expansion" type="button">✕ 접기</button>
+        </div>
+      </td>
+    </tr>
+  `;
+
+  if (state.expansionLoading || !state.expansionRows) {
+    return headerRow + `<tr class="expansion-row"><td colspan="16" style="padding:18px; text-align:center; color:#64748b;">로딩 중…</td></tr>`;
+  }
+
+  const items = state.items.filter(it => it.customer_id === cid);
+  if (!items.length) {
+    return headerRow + `<tr class="expansion-row"><td colspan="16" style="padding:18px; text-align:center; color:#64748b;">자산이 없습니다.</td></tr>`;
+  }
+
+  // 표시 대상: 과거 N개월 (현재월 제외, 최신부터)
+  const ymAll  = listMonthsBack(state.ym, months + 2);
+  const pastYms = ymAll.slice(1, months + 1);
+
+  let rowsHtml = '';
+  for (const it of items) {
+    const isMeter = (it.category === 'printer') || (it.category === '출력') || ['laser','inkjet','복합기'].includes(it.subtype);
+    for (let i = 0; i < pastYms.length; i++) {
+      const ym = pastYms[i];
+      const prevYm = ymAll[i + 2]; // ym 의 직전월
+      const cur  = state.expansionRows.get(`${it.id}|${ym}`) || null;
+      const prev = state.expansionRows.get(`${it.id}|${prevYm}`) || null;
+      rowsHtml += renderExpansionRow(it, ym, cur, prev, isMeter);
+    }
+  }
+
+  return headerRow + (rowsHtml ||
+    `<tr class="expansion-row"><td colspan="16" style="padding:18px; text-align:center; color:#64748b;">표시할 데이터가 없습니다.</td></tr>`);
+}
+
+function renderExpansionRow(it, ym, cur, prev, isMeter) {
+  const [yy, mm] = ym.split('-');
+  const dateLabel = `${Number(mm)}월<br><span style="font-size:10px;color:#94a3b8;">${yy}</span>`;
+  const subtag = it.subtype ? ` <span class="muted-small">/${escapeHtml(it.subtype)}</span>` : '';
+
+  if (!isMeter) {
+    const dash  = `<td class="num grp-bw dim">N/A</td>`;
+    const dash2 = `<td class="num grp-co dim">N/A</td>`;
+    return `
+      <tr class="expansion-row">
+        <td><div class="muted-small" style="padding-left:18px; color:#94a3b8;">↳ ${escapeHtml(it.brand||'')} ${escapeHtml(it.model||it.id)}${subtag}</div></td>
+        <td style="text-align:center; color:#64748b;">${dateLabel}</td>
+        ${dash.repeat(7)}${dash2.repeat(7)}
+      </tr>
+    `;
+  }
+
+  const bw_cur  = cur?.bw ?? null;
+  const co_cur  = cur?.color ?? null;
+  const bw_prev = prev?.bw ?? null;
+  const co_prev = prev?.color ?? null;
+  const bw_month = (bw_cur != null && bw_prev != null) ? Math.max(0, bw_cur - bw_prev) : null;
+  const co_month = (co_cur != null && co_prev != null) ? Math.max(0, co_cur - co_prev) : null;
+  const bw_extra = bw_month != null ? Math.max(0, bw_month - (it.bw_free || 0)) : null;
+  const co_extra = co_month != null ? Math.max(0, co_month - (it.co_free || 0)) : null;
+  const bw_charge = bw_extra != null ? bw_extra * (it.bw_rate || 0) : null;
+  const co_charge = co_extra != null ? co_extra * (it.co_rate || 0) : null;
+
+  return `
+    <tr class="expansion-row">
+      <td><div class="muted-small" style="padding-left:18px; color:#94a3b8;">↳ ${escapeHtml(it.brand||'')} ${escapeHtml(it.model||it.id)}${subtag}</div></td>
+      <td style="text-align:center; color:#64748b;">${dateLabel}</td>
+      <td class="num grp-bw" style="color:#64748b;">${fmt(bw_prev)}</td>
+      <td class="num grp-bw">${fmt(bw_cur)}</td>
+      <td class="num grp-bw dim">${fmt(it.bw_free)}</td>
+      <td class="num grp-bw">${fmt(bw_month)}</td>
+      <td class="num grp-bw">${fmt(bw_extra)}</td>
+      <td class="num grp-bw dim">${fmt(it.bw_rate)}</td>
+      <td class="num grp-bw charge">${fmt(bw_charge)}</td>
+      <td class="num grp-co" style="color:#64748b;">${fmt(co_prev)}</td>
+      <td class="num grp-co">${fmt(co_cur)}</td>
+      <td class="num grp-co dim">${fmt(it.co_free)}</td>
+      <td class="num grp-co">${fmt(co_month)}</td>
+      <td class="num grp-co">${fmt(co_extra)}</td>
+      <td class="num grp-co dim">${fmt(it.co_rate)}</td>
+      <td class="num grp-co charge">${fmt(co_charge)}</td>
+    </tr>
+  `;
 }
 
 // ---------- utils ----------
@@ -982,7 +1203,11 @@ async function saveExcelBatch({ auto = false } = {}) {
       .upsert(payloads, { onConflict: 'item_id,ym' });
     if (error) throw error;
 
-    for (const p of payloads) state.curMap[p.item_id] = p;
+    for (const p of payloads) {
+      state.curMap[p.item_id] = p;
+      state.itemsEverCounted.add(p.item_id);
+    }
+    deriveCustomersEverCounted();
     // 저장된 행 상태 표시
     for (const r of targets) r.status = 'saved';
 

@@ -9,6 +9,38 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="../config.js"></script>
 <script src="../auth.js"></script>
+<style>
+  /* 거래처명 클릭 링크 */
+  .customer-name-link {
+    cursor: pointer;
+    color: #0f172a;
+    text-decoration: underline dotted #94a3b8;
+    text-underline-offset: 3px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .customer-name-link:hover { color: #2563eb; text-decoration-color: #2563eb; }
+  .customer-name-link.expanded { color: #2563eb; text-decoration-color: #2563eb; }
+  .customer-name-link .icon { font-size: 11px; opacity: 0.7; }
+
+  /* 인라인 확장 — 지난 자료 (3/6/12개월) */
+  tr.expansion-header td {
+    background: #eef2ff !important;
+    padding: 8px 12px !important;
+    border-bottom: 1px solid #c7d2fe;
+  }
+  tr.expansion-row td { background: #fafbfc; }
+  tr.expansion-row td.charge { color: #b45309; }
+
+  .ch-tab {
+    border: 1px solid #cbd5e1; background: #fff; color: #475569;
+    border-radius: 6px; padding: 4px 10px; font-size: 11.5px; cursor: pointer;
+    font-family: inherit; font-weight: 500;
+  }
+  .ch-tab:hover { background: #f1f5f9; }
+  .ch-tab.active { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
+</style>
 </head>
 <body>
 <main class="container">
@@ -113,17 +145,8 @@
       <label>대상 월
         <input type="month" id="f-month" />
       </label>
-      <label>거래처
-        <select id="f-customer"><option value="">전체</option></select>
-      </label>
-      <label>카테고리
-        <select id="f-category">
-          <option value="">전체</option>
-          <option value="printer">출력기기</option>
-          <option value="pc">PC</option>
-          <option value="nas">NAS</option>
-          <option value="wellness">웰리스</option>
-        </select>
+      <label>거래처 검색
+        <input type="search" id="f-customer-search" placeholder="회사명…" autocomplete="off" />
       </label>
       <label style="font-size:12px;">
         <input type="checkbox" id="f-only-missing"> 미수집만
@@ -179,6 +202,6 @@
 
   <div id="toast" style="position:fixed; bottom:20px; right:20px; padding:10px 16px; border-radius:8px; background:#0f172a; color:#fff; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s; z-index:9999;"></div>
 </main>
-<script src="index.js?v=20260513l"></script>
+<script src="index.js?v=20260515b"></script>
 </body>
 </html>
